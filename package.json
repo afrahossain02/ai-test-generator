@@ -13,8 +13,10 @@
   "scripts": {
     "start": "node src/cli.js",
     "demo": "node src/cli.js generate --story examples/sample-user-story.txt --dry-run",
+    "codegen": "node src/cli.js codegen --plan examples/saucedemo-testplan.json --name saucedemo",
     "test": "vitest run",
-    "check": "node --check src/cli.js && node --check src/generator/schema.js && node --check src/generator/promptTemplates.js && node --check src/generator/testCaseGenerator.js && node --check src/utils/render.js && node --check src/utils/errors.js && node --check src/utils/paths.js"
+    "test:generated": "npm run codegen && playwright test",
+    "check": "for f in $(find src -name '*.js'); do node --check \"$f\" || exit 1; done && node --check playwright.config.js"
   },
   "keywords": [
     "testing",
@@ -33,6 +35,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "vitest": "^3.2.4"
   }
 }

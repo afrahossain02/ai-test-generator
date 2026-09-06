@@ -8,6 +8,7 @@ import { Command } from "commander";
 import pc from "picocolors";
 
 import { generateTestPlan, DEFAULT_MODEL } from "./generator/testCaseGenerator.js";
+import { generateSpec, slugify, summarizeStats } from "./generator/codeGenerator.js";
 import { parseTestPlan } from "./generator/schema.js";
 import { renderTestPlan } from "./utils/render.js";
 import { describeError } from "./utils/errors.js";
@@ -29,6 +30,7 @@ program
   .option("-j, --json <path>", "also write the test plan as JSON to this path")
   .option("-d, --dry-run", "use the bundled example plan; makes no API call", false)
   .option("-m, --model <id>", "model to use", process.env.AI_TESTGEN_MODEL || DEFAULT_MODEL)
+  .option("-e, --emit [dir]", "also write a Playwright spec file into this directory")
   .action(async (options) => {
     try {
       await runGenerate(options);
@@ -58,6 +60,37 @@ async function runGenerate(options) {
     fs.writeFileSync(outPath, `${JSON.stringify(plan, null, 2)}\n`);
     console.log(pc.dim(`Wrote ${plan.testCases.length} test cases to ${outPath}`));
   }
+
+  if (options.emit) {
+    const outDir = typeof options.emit === "string" ? options.emit : DEFAULT_OUT_DIR;
+    writeSpec(plan, { outDir });
+  }
+}
+
+const DEFAULT_OUT_DIR = "generated-tests";
+
+/** Renders a plan as a Playwright spec and writes it, reporting what it produced. */
+function writeSpec(plan, { outDir, name }) {
+  const { source, stats } = generateSpec(plan);
+  const fileName = `${name ?? slugify(plan.sourceSummary)}.spec.js`;
+  const outPath = path.resolve(outDir, fileName);
+
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, source);
+
+  console.log(`\n${pc.green("✓")} Wrote ${pc.bold(path.relative(process.cwd(), outPath))}`);
+  console.log(pc.dim(`  ${summarizeStats(stats)}`));
+
+  if (stats.fixme > 0) {
+    console.log(
+      pc.dim(
+        `  ${stats.fixme} test${stats.fixme === 1 ? "" : "s"} marked test.fixme — steps the generator could not translate are left as TODOs rather than passing silently.`,
+      ),
+    );
+  }
+  console.log(pc.dim(`  Run them with: npx playwright test ${path.relative(process.cwd(), outPath)}`));
+
+  return { outPath, stats };
 }
 
 function loadFixturePlan() {
@@ -101,5 +134,30 @@ function readStory({ storyPath, text }) {
   }
   return fs.readFileSync(resolved, "utf8");
 }
+
+program
+  .command("codegen")
+  .description("Turn a saved test plan into a Playwright spec file")
+  .requiredOption("-p, --plan <path>", "path to a test plan JSON file")
+  .option("-o, --out-dir <dir>", "directory to write the spec into", DEFAULT_OUT_DIR)
+  .option("-n, --name <name>", "base name for the spec file (without .spec.js)")
+  .action((options) => {
+    try {
+      const planPath = path.resolve(options.plan);
+      if (!fs.existsSync(planPath)) {
+        throw new Error(`No such file: ${planPath}`);
+      }
+      // Validated on the way in: a hand-edited plan fails here with a schema
+      // error rather than producing a broken spec file.
+      const plan = parseTestPlan(JSON.parse(fs.readFileSync(planPath, "utf8")));
+      writeSpec(plan, { outDir: options.outDir, name: options.name });
+    } catch (error) {
+      const { message, hint } = describeError(error);
+      console.error(`\n${pc.red("✗")} ${message}`);
+      if (hint) console.error(`  ${pc.dim(hint)}`);
+      console.error("");
+      process.exitCode = 1;
+    }
+  });
 
 program.parse();

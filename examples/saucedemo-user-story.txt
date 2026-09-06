@@ -1,0 +1,17 @@
+Title: Sign in to the Swag Labs storefront
+
+As a returning shopper
+I want to sign in with my username and password
+So that I can browse the product catalogue
+
+Target: https://www.saucedemo.com (a public demo storefront)
+
+Acceptance criteria:
+- The sign-in form has a Username field, a Password field, and a "Login" button.
+- Valid credentials (standard_user / secret_sauce) land the shopper on /inventory.html
+  with the "Products" heading visible.
+- Wrong credentials show "Epic sadface: Username and password do not match any user in this service".
+- Submitting with no username shows "Epic sadface: Username is required".
+- Submitting a username with no password shows "Epic sadface: Password is required".
+- A locked-out account (locked_out_user) shows "Epic sadface: Sorry, this user has been locked out."
+- The password field is masked at all times.

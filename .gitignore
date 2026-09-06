@@ -4,3 +4,6 @@ node_modules/
 out.json
 generated-tests/
 .DS_Store
+test-results/
+playwright-report/
+blob-report/

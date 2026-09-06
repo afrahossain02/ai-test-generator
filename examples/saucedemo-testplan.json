@@ -1,0 +1,101 @@
+{
+  "sourceType": "user_story",
+  "sourceSummary": "Sign-in for the Swag Labs demo storefront at saucedemo.com.",
+  "generatedAt": "2026-09-06T12:00:00.000Z",
+  "testCases": [
+    {
+      "id": "TC-001",
+      "title": "Valid credentials land the shopper on the product catalogue",
+      "category": "happy_path",
+      "priority": "P0",
+      "preconditions": ["The standard_user account is not locked out"],
+      "steps": [
+        { "action": "Navigate to /", "expectedObservation": "The \"Login\" button is visible" },
+        { "action": "Type \"standard_user\" into the Username field", "expectedObservation": "" },
+        { "action": "Type \"secret_sauce\" into the Password field", "expectedObservation": "" },
+        { "action": "Click the \"Login\" button", "expectedObservation": "The shopper lands on /inventory.html" }
+      ],
+      "expectedResult": "The heading \"Products\" is visible.",
+      "rationale": "The primary path. If this breaks, every other case is untestable.",
+      "testData": [
+        { "key": "username", "value": "standard_user" },
+        { "key": "password", "value": "secret_sauce" }
+      ]
+    },
+    {
+      "id": "TC-002",
+      "title": "A wrong password is rejected with the generic credentials error",
+      "category": "negative",
+      "priority": "P0",
+      "preconditions": [],
+      "steps": [
+        { "action": "Navigate to /", "expectedObservation": "" },
+        { "action": "Type \"standard_user\" into the Username field", "expectedObservation": "" },
+        { "action": "Type \"definitely_wrong\" into the Password field", "expectedObservation": "" },
+        { "action": "Click the \"Login\" button", "expectedObservation": "" }
+      ],
+      "expectedResult": "The error message \"Epic sadface: Username and password do not match any user in this service\" is visible.",
+      "rationale": "Catches a wrong password being accepted, and confirms the error does not reveal whether the username exists.",
+      "testData": [{ "key": "password", "value": "definitely_wrong" }]
+    },
+    {
+      "id": "TC-003",
+      "title": "Submitting an empty form asks for the username first",
+      "category": "negative",
+      "priority": "P1",
+      "preconditions": [],
+      "steps": [
+        { "action": "Navigate to /", "expectedObservation": "" },
+        { "action": "Click the \"Login\" button", "expectedObservation": "" }
+      ],
+      "expectedResult": "The error message \"Epic sadface: Username is required\" is visible.",
+      "rationale": "Catches an empty submission reaching the authentication backend instead of being stopped at the form.",
+      "testData": []
+    },
+    {
+      "id": "TC-004",
+      "title": "A username with no password is rejected on the password field",
+      "category": "boundary",
+      "priority": "P1",
+      "preconditions": [],
+      "steps": [
+        { "action": "Navigate to /", "expectedObservation": "" },
+        { "action": "Type \"standard_user\" into the Username field", "expectedObservation": "" },
+        { "action": "Click the \"Login\" button", "expectedObservation": "" }
+      ],
+      "expectedResult": "The error message \"Epic sadface: Password is required\" is visible.",
+      "rationale": "The empty-password boundary: catches a blank password being treated as a match against an empty stored hash.",
+      "testData": [{ "key": "password", "value": "" }]
+    },
+    {
+      "id": "TC-005",
+      "title": "A locked-out account is refused even with the correct password",
+      "category": "edge_case",
+      "priority": "P0",
+      "preconditions": ["The locked_out_user account has been locked by an administrator"],
+      "steps": [
+        { "action": "Navigate to /", "expectedObservation": "" },
+        { "action": "Type \"locked_out_user\" into the Username field", "expectedObservation": "" },
+        { "action": "Type \"secret_sauce\" into the Password field", "expectedObservation": "" },
+        { "action": "Click the \"Login\" button", "expectedObservation": "" }
+      ],
+      "expectedResult": "The error message \"Epic sadface: Sorry, this user has been locked out.\" is visible.",
+      "rationale": "Catches the lockout flag being stored but never checked during authentication — valid credentials would sail straight through.",
+      "testData": [{ "key": "username", "value": "locked_out_user" }]
+    },
+    {
+      "id": "TC-006",
+      "title": "The password field is masked at all times",
+      "category": "security",
+      "priority": "P0",
+      "preconditions": [],
+      "steps": [
+        { "action": "Navigate to /", "expectedObservation": "" },
+        { "action": "Read the type attribute of the Password field", "expectedObservation": "It is \"password\", so the typed value is masked" }
+      ],
+      "expectedResult": "The password is never rendered as readable text.",
+      "rationale": "Catches a field that renders as plain text, exposing the password to anyone looking at the screen or a screen recording.",
+      "testData": []
+    }
+  ]
+}
