@@ -5,7 +5,13 @@ import { execFileSync } from "node:child_process";
 
 import { describe, it, expect } from "vitest";
 
-import { generateSpec, slugify, summarizeStats } from "../src/generator/codeGenerator.js";
+import {
+  generateSpec,
+  slugify,
+  summarizeStats,
+  specMode,
+  specSuffix,
+} from "../src/generator/codeGenerator.js";
 import { parseTestPlan } from "../src/generator/schema.js";
 import { fixtureTestPlanPath } from "../src/utils/paths.js";
 
@@ -168,5 +174,69 @@ describe("slugify", () => {
 
   it("falls back when there is nothing usable", () => {
     expect(slugify("!!!", "plan")).toBe("plan");
+  });
+});
+
+const apiPlan = parseTestPlan(
+  JSON.parse(fs.readFileSync("examples/fixture-api-testplan.json", "utf8")),
+);
+
+describe("API specs", () => {
+  const { source, stats, mode } = generateSpec(apiPlan);
+
+  it("compiles an openapi plan in api mode", () => {
+    expect(mode).toBe("api");
+    expect(specMode(apiPlan)).toBe("api");
+    expect(specMode(signInPlan)).toBe("ui");
+  });
+
+  it("names files by mode so each project gets its own baseURL", () => {
+    expect(specSuffix(apiPlan)).toBe(".api.spec.js");
+    expect(specSuffix(signInPlan)).toBe(".ui.spec.js");
+  });
+
+  it("uses the request fixture, not page", () => {
+    expect(source).toContain("async ({ request }) => {");
+    expect(source).not.toContain("async ({ page }) => {");
+  });
+
+  it("omits the UI locator helpers", () => {
+    expect(source).not.toContain("const field = (page, name)");
+    expect(source).not.toContain("clickable");
+  });
+
+  it("declares the response binding once per test that makes a request", () => {
+    // Every generated request assigns to `response`; without the declaration
+    // the spec throws a ReferenceError at run time instead of failing an
+    // assertion. Split on real test-block openers, not the substring "test".
+    const [, ...bodies] = source.split(/^ {2}test(?:\.fixme)?\(/m);
+    expect(bodies).toHaveLength(apiPlan.testCases.length);
+
+    for (const body of bodies) {
+      const requests = body.match(/await request\./g) ?? [];
+      const declarations = body.match(/let response;/g) ?? [];
+      expect(declarations).toHaveLength(requests.length > 0 ? 1 : 0);
+    }
+  });
+
+  it("emits syntactically valid JavaScript", () => {
+    const file = path.join(os.tmpdir(), `ai-testgen-api-${process.pid}.mjs`);
+    fs.writeFileSync(file, source);
+    try {
+      expect(() => execFileSync(process.execPath, ["--check", file])).not.toThrow();
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
+  });
+
+  it("leaves the untranslatable latency case as fixme rather than passing it", () => {
+    expect(stats.fixme).toBe(1);
+    expect(source).toContain("test.fixme('TC-010");
+  });
+
+  it("compiles the rest of the plan into runnable tests", () => {
+    expect(stats.runnable).toBe(9);
+    expect(stats.translatedSteps).toBe(stats.steps);
+    expect(stats.assertions).toBeGreaterThan(15);
   });
 });

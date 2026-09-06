@@ -13,10 +13,11 @@
   "scripts": {
     "start": "node src/cli.js",
     "demo": "node src/cli.js generate --story examples/sample-user-story.txt --dry-run",
-    "codegen": "node src/cli.js codegen --plan examples/saucedemo-testplan.json --name saucedemo",
+    "codegen": "node src/cli.js codegen --plan examples/saucedemo-testplan.json --name saucedemo && node src/cli.js codegen --plan examples/fixture-api-testplan.json --name jsonplaceholder",
     "test": "vitest run",
     "test:generated": "npm run codegen && playwright test",
-    "check": "for f in $(find src -name '*.js'); do node --check \"$f\" || exit 1; done && node --check playwright.config.js"
+    "check": "for f in $(find src -name '*.js'); do node --check \"$f\" || exit 1; done && node --check playwright.config.js",
+    "demo:api": "node src/cli.js generate --spec examples/jsonplaceholder-openapi.yaml --dry-run"
   },
   "keywords": [
     "testing",
@@ -32,6 +33,7 @@
     "commander": "^14.0.0",
     "dotenv": "^17.0.0",
     "picocolors": "^1.1.1",
+    "yaml": "^2.9.0",
     "zod": "^4.5.4"
   },
   "devDependencies": {

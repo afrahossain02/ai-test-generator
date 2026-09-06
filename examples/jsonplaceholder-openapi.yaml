@@ -1,0 +1,117 @@
+openapi: 3.0.3
+info:
+  title: JSONPlaceholder Posts API
+  version: "1.0.0"
+  description: >
+    A slice of the public JSONPlaceholder fake REST API, used as a live target
+    for generated API tests. Writes are accepted and echoed back but not
+    persisted, which makes it safe to run against repeatedly.
+servers:
+  - url: https://jsonplaceholder.typicode.com
+paths:
+  /posts:
+    get:
+      operationId: listPosts
+      summary: List all posts
+      tags: [posts]
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Filter posts to a single author
+      responses:
+        "200":
+          description: An array of posts
+    post:
+      operationId: createPost
+      summary: Create a post
+      tags: [posts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewPost"
+      responses:
+        "201":
+          description: The created post, with a server-assigned id
+  /posts/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+    get:
+      operationId: getPost
+      summary: Fetch a single post by id
+      tags: [posts]
+      responses:
+        "200":
+          description: The requested post
+        "404":
+          description: No post with that id
+    put:
+      operationId: replacePost
+      summary: Replace a post
+      tags: [posts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewPost"
+      responses:
+        "200":
+          description: The updated post
+    delete:
+      operationId: deletePost
+      summary: Delete a post
+      tags: [posts]
+      responses:
+        "200":
+          description: Deleted
+  /posts/{id}/comments:
+    get:
+      operationId: listPostComments
+      summary: List the comments on a post
+      tags: [comments]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: An array of comments
+  /users/{id}:
+    get:
+      operationId: getUser
+      summary: Fetch a single user by id
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The requested user
+        "404":
+          description: No user with that id
+components:
+  schemas:
+    NewPost:
+      type: object
+      required: [title, body, userId]
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        userId:
+          type: integer

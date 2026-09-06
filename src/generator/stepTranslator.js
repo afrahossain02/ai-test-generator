@@ -26,7 +26,7 @@ function urlPattern(value) {
   return `/${escaped}/`;
 }
 
-const ACTION_RULES = [
+const UI_ACTION_RULES = [
   {
     name: "navigate",
     pattern: /^(?:navigate|go|browse)\s+to\s+(\S+)/i,
@@ -82,7 +82,7 @@ const ACTION_RULES = [
   },
 ];
 
-const OBSERVATION_RULES = [
+const UI_OBSERVATION_RULES = [
   {
     name: "urlIs",
     pattern: /\b(?:URL|url)\s+is\s+(?:still\s+)?(\/\S*)/i,
@@ -132,20 +132,146 @@ const OBSERVATION_RULES = [
   },
 ];
 
+
+/**
+ * API rules. The prompt in promptTemplates.js teaches the model exactly these
+ * phrasings — the two files are a matched pair, and changing one without the
+ * other shows up immediately as a drop in the translated-step percentage.
+ *
+ * Generated API specs assign every request to a single `response` binding that
+ * the code generator declares once per test, so a case can make several calls
+ * without the rules needing to track how many came before.
+ */
+const API_METHODS = {
+  GET: "get",
+  POST: "post",
+  PUT: "put",
+  PATCH: "patch",
+  DELETE: "delete",
+  HEAD: "head",
+};
+
+/** Renders a JSON body as a JS object literal, or null if it is not valid JSON. */
+function bodyLiteral(raw) {
+  const text = String(raw).trim().replace(/[.,;]+$/, "");
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed === null || typeof parsed !== "object") return null;
+    return JSON.stringify(parsed);
+  } catch {
+    return null;
+  }
+}
+
+/** Renders a JSON scalar from prose: "text", 42, true. */
+function scalarLiteral(raw) {
+  const text = String(raw).trim().replace(/[.,;]+$/, "");
+  if (/^"[^"]*"$/.test(text)) return quote(text.slice(1, -1));
+  if (/^-?\d+(?:\.\d+)?$/.test(text)) return text;
+  if (/^(?:true|false|null)$/i.test(text)) return text.toLowerCase();
+  return quote(text);
+}
+
+const API_ACTION_RULES = [
+  {
+    name: "sendWithBody",
+    pattern: /^send\s+(GET|POST|PUT|PATCH|DELETE|HEAD)\s+(\S+)\s+with\s+body\s+(.+)$/i,
+    build: (match) => {
+      const method = API_METHODS[match[1].toUpperCase()];
+      const body = bodyLiteral(match[3]);
+      // An unparseable body is not something to guess at — fall through to
+      // unresolved so the test is flagged rather than silently wrong.
+      if (!method || !body) return null;
+      return [`response = await request.${method}(${quote(match[2])}, { data: ${body} });`];
+    },
+  },
+  {
+    name: "send",
+    pattern: /^send\s+(GET|POST|PUT|PATCH|DELETE|HEAD)\s+(\S+)\s*$/i,
+    build: (match) => {
+      const method = API_METHODS[match[1].toUpperCase()];
+      if (!method) return null;
+      return [`response = await request.${method}(${quote(match[2])});`];
+    },
+  },
+];
+
+const API_OBSERVATION_RULES = [
+  {
+    name: "status",
+    pattern: /\bresponse\s+status\s+(?:code\s+)?(?:is|should\s+be|equals)\s+(\d{3})\b/i,
+    build: (match) => [`expect(response.status()).toBe(${match[1]});`],
+  },
+  {
+    name: "ok",
+    pattern: /\bresponse\s+(?:is|should\s+be)\s+(?:successful|ok)\b/i,
+    build: () => ["expect(response.ok()).toBeTruthy();"],
+  },
+  {
+    name: "fieldEquals",
+    pattern: /\bfield\s+"([^"]+)"\s+(?:is\s+)?equal\s+to\s+("[^"]*"|\S+)/i,
+    build: (match) => [
+      `expect(await response.json()).toHaveProperty(${quote(match[1])}, ${scalarLiteral(match[2])});`,
+    ],
+  },
+  {
+    name: "hasField",
+    pattern: /\bbody\s+has\s+(?:an?\s+)?"([^"]+)"\s+field\b/i,
+    build: (match) => [`expect(await response.json()).toHaveProperty(${quote(match[1])});`],
+  },
+  {
+    name: "isArray",
+    pattern: /\bbody\s+is\s+an\s+array\b/i,
+    build: () => ["expect(Array.isArray(await response.json())).toBe(true);"],
+  },
+  {
+    name: "arrayNotEmpty",
+    pattern: /\barray\s+is\s+not\s+empty\b/i,
+    build: () => ["expect((await response.json()).length).toBeGreaterThan(0);"],
+  },
+  {
+    name: "bodyNotContains",
+    // Security cases usually assert an absence: no password hash, no internal id.
+    pattern: /\bbody\s+does\s+not\s+contain\s+"([^"]+)"/i,
+    build: (match) => [`expect(await response.text()).not.toContain(${quote(match[1])});`],
+  },
+  {
+    name: "bodyContains",
+    pattern: /\bbody\s+contains\s+"([^"]+)"/i,
+    build: (match) => [`expect(await response.text()).toContain(${quote(match[1])});`],
+  },
+];
+
+const RULES = {
+  ui: { actions: UI_ACTION_RULES, observations: UI_OBSERVATION_RULES },
+  api: { actions: API_ACTION_RULES, observations: API_OBSERVATION_RULES },
+};
+
+/** The two spec styles the translator can target. */
+export const MODES = Object.keys(RULES);
+
+function rulesFor(mode) {
+  const set = RULES[mode];
+  if (!set) throw new Error(`Unknown translation mode: ${mode}`);
+  return set;
+}
+
 /**
  * @param {string} action
+ * @param {'ui'|'api'} [mode]
  * @returns {{resolved: boolean, statements: string[], rule: string}}
  */
-export function translateAction(action) {
-  return applyRules(ACTION_RULES, action);
+export function translateAction(action, mode = "ui") {
+  return applyRules(rulesFor(mode).actions, action);
 }
 
 /**
  * Observations are optional: an empty one is not a failure to translate,
  * it just means the step had nothing to assert.
  * @param {string} observation
+ * @param {'ui'|'api'} [mode]
  */
-export function translateObservation(observation) {
+export function translateObservation(observation, mode = "ui") {
   if (!observation?.trim()) {
     return { resolved: true, statements: [], rule: "empty" };
   }
@@ -155,10 +281,10 @@ export function translateObservation(observation) {
   const subject = observation.trim();
   const statements = [];
   const rules = [];
-  for (const rule of OBSERVATION_RULES) {
+  for (const rule of rulesFor(mode).observations) {
     const match = subject.match(rule.pattern);
     if (!match) continue;
-    for (const statement of rule.build(match)) {
+    for (const statement of rule.build(match) ?? []) {
       if (!statements.includes(statement)) {
         statements.push(statement);
         if (!rules.includes(rule.name)) rules.push(rule.name);
@@ -176,8 +302,12 @@ function applyRules(rules, text) {
   const subject = text.trim();
   for (const rule of rules) {
     const match = subject.match(rule.pattern);
-    if (match) {
-      return { resolved: true, statements: rule.build(match), rule: rule.name };
+    if (!match) continue;
+    // build() returns null when the rule matched the shape but not the
+    // content — an unparseable JSON body, say. That is a decline, not a match.
+    const statements = rule.build(match);
+    if (statements) {
+      return { resolved: true, statements, rule: rule.name };
     }
   }
   return { resolved: false, statements: [], rule: "none" };
@@ -188,5 +318,9 @@ function capitalize(value) {
 }
 
 /** Exposed so tests and docs can report what phrasings are understood. */
-export const SUPPORTED_ACTIONS = ACTION_RULES.map((rule) => rule.name);
-export const SUPPORTED_OBSERVATIONS = OBSERVATION_RULES.map((rule) => rule.name);
+export const SUPPORTED_ACTIONS = Object.fromEntries(
+  Object.entries(RULES).map(([mode, set]) => [mode, set.actions.map((rule) => rule.name)]),
+);
+export const SUPPORTED_OBSERVATIONS = Object.fromEntries(
+  Object.entries(RULES).map(([mode, set]) => [mode, set.observations.map((rule) => rule.name)]),
+);

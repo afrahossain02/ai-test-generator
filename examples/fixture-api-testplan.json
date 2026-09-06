@@ -1,0 +1,130 @@
+{
+  "sourceType": "openapi",
+  "sourceSummary": "Posts and users endpoints of the JSONPlaceholder API.",
+  "generatedAt": "2026-09-06T12:00:00.000Z",
+  "testCases": [
+    {
+      "id": "TC-001",
+      "title": "Listing posts returns a non-empty collection",
+      "category": "happy_path",
+      "priority": "P0",
+      "preconditions": [],
+      "steps": [
+        { "action": "Send GET /posts", "expectedObservation": "The response status is 200 and the response body is an array" }
+      ],
+      "expectedResult": "The array is not empty.",
+      "rationale": "The catalogue endpoint returning 200 with an empty array looks healthy to a monitor but is a total outage to a caller.",
+      "testData": []
+    },
+    {
+      "id": "TC-002",
+      "title": "Fetching a known post returns that post",
+      "category": "happy_path",
+      "priority": "P0",
+      "preconditions": ["Post 1 exists"],
+      "steps": [
+        { "action": "Send GET /posts/1", "expectedObservation": "The response status is 200" }
+      ],
+      "expectedResult": "The response body has field \"id\" equal to 1 and the response body has a \"title\" field.",
+      "rationale": "Catches an off-by-one in id lookup that returns a neighbouring record — the status code stays 200 while the data is wrong.",
+      "testData": [{ "key": "id", "value": "1" }]
+    },
+    {
+      "id": "TC-003",
+      "title": "Fetching the comments on a post returns a collection",
+      "category": "happy_path",
+      "priority": "P1",
+      "preconditions": ["Post 1 exists and has comments"],
+      "steps": [
+        { "action": "Send GET /posts/1/comments", "expectedObservation": "The response status is 200 and the response body is an array" }
+      ],
+      "expectedResult": "The array is not empty.",
+      "rationale": "Catches a broken join on the nested route, which typically returns an empty array rather than an error.",
+      "testData": []
+    },
+    {
+      "id": "TC-004",
+      "title": "Creating a post echoes the submitted fields with a new id",
+      "category": "happy_path",
+      "priority": "P0",
+      "preconditions": [],
+      "steps": [
+        {
+          "action": "Send POST /posts with body {\"title\":\"generated\",\"body\":\"from ai-test-generator\",\"userId\":1}",
+          "expectedObservation": "The response status is 201"
+        }
+      ],
+      "expectedResult": "The response body has field \"title\" equal to \"generated\" and the response body has a \"id\" field.",
+      "rationale": "Catches a create that returns 201 while silently dropping or mangling the submitted fields.",
+      "testData": [{ "key": "title", "value": "generated" }]
+    },
+    {
+      "id": "TC-005",
+      "title": "An unknown post id is refused rather than guessed at",
+      "category": "negative",
+      "priority": "P0",
+      "preconditions": ["No post with id 9999 exists"],
+      "steps": [{ "action": "Send GET /posts/9999", "expectedObservation": "" }],
+      "expectedResult": "The response status is 404.",
+      "rationale": "Catches an unknown id falling through to a 200 with an empty body, which a client cannot distinguish from a real record.",
+      "testData": [{ "key": "id", "value": "9999" }]
+    },
+    {
+      "id": "TC-006",
+      "title": "Post id zero is treated as not found, not as a falsy default",
+      "category": "boundary",
+      "priority": "P1",
+      "preconditions": [],
+      "steps": [{ "action": "Send GET /posts/0", "expectedObservation": "" }],
+      "expectedResult": "The response status is 404.",
+      "rationale": "Zero is the classic falsy-id bug: a truthiness check on the id treats 0 as absent and can return the whole collection or the first record instead of a 404.",
+      "testData": [{ "key": "id", "value": "0" }]
+    },
+    {
+      "id": "TC-007",
+      "title": "An unknown user id is refused",
+      "category": "negative",
+      "priority": "P1",
+      "preconditions": ["No user with id 9999 exists"],
+      "steps": [{ "action": "Send GET /users/9999", "expectedObservation": "" }],
+      "expectedResult": "The response status is 404.",
+      "rationale": "Confirms the not-found path is wired on the users route too, not just on posts.",
+      "testData": []
+    },
+    {
+      "id": "TC-008",
+      "title": "Filtering posts by author returns a usable collection",
+      "category": "edge_case",
+      "priority": "P2",
+      "preconditions": ["User 1 has authored at least one post"],
+      "steps": [
+        { "action": "Send GET /posts?userId=1", "expectedObservation": "The response status is 200 and the response body is an array" }
+      ],
+      "expectedResult": "The array is not empty.",
+      "rationale": "Catches an unrecognised query parameter being ignored — the endpoint returns 200 with every post, which looks correct until you count them.",
+      "testData": [{ "key": "userId", "value": "1" }]
+    },
+    {
+      "id": "TC-009",
+      "title": "A user record does not leak credential material",
+      "category": "security",
+      "priority": "P0",
+      "preconditions": ["User 1 exists"],
+      "steps": [{ "action": "Send GET /users/1", "expectedObservation": "The response status is 200" }],
+      "expectedResult": "The response body has a \"email\" field and the response body does not contain \"password\".",
+      "rationale": "Catches a serializer that returns the whole user row, exposing a password hash to any caller who can read a profile.",
+      "testData": []
+    },
+    {
+      "id": "TC-010",
+      "title": "A single post is served well within the latency budget",
+      "category": "edge_case",
+      "priority": "P2",
+      "preconditions": [],
+      "steps": [{ "action": "Send GET /posts/1", "expectedObservation": "" }],
+      "expectedResult": "The response is returned in under 500 milliseconds.",
+      "rationale": "Catches a missing index on the posts table, which shows up as latency long before it shows up as an error.",
+      "testData": []
+    }
+  ]
+}

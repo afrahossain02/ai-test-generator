@@ -7,12 +7,22 @@ import path from "node:path";
 import { Command } from "commander";
 import pc from "picocolors";
 
-import { generateTestPlan, DEFAULT_MODEL } from "./generator/testCaseGenerator.js";
-import { generateSpec, slugify, summarizeStats } from "./generator/codeGenerator.js";
+import {
+  generateTestPlan,
+  generateApiTestPlan,
+  DEFAULT_MODEL,
+} from "./generator/testCaseGenerator.js";
+import {
+  generateSpec,
+  slugify,
+  summarizeStats,
+  specSuffix,
+} from "./generator/codeGenerator.js";
+import { loadOpenApiFile, filterOperations, renderOperations } from "./openapi/parser.js";
 import { parseTestPlan } from "./generator/schema.js";
 import { renderTestPlan } from "./utils/render.js";
 import { describeError } from "./utils/errors.js";
-import { fixtureTestPlanPath } from "./utils/paths.js";
+import { fixtureTestPlanPath, fixtureApiTestPlanPath } from "./utils/paths.js";
 
 const program = new Command();
 
@@ -26,6 +36,8 @@ program
   .description("Generate test cases from a user story")
   .option("-s, --story <path>", "path to a file containing the user story")
   .option("-t, --text <story>", "the user story as inline text")
+  .option("-S, --spec <path>", "path to an OpenAPI/Swagger file (generates API tests)")
+  .option("-f, --filter <pattern>", "with --spec, only endpoints matching this regex")
   .option("-c, --count <n>", "target number of test cases", "10")
   .option("-j, --json <path>", "also write the test plan as JSON to this path")
   .option("-d, --dry-run", "use the bundled example plan; makes no API call", false)
@@ -50,7 +62,7 @@ async function runGenerate(options) {
   }
 
   const plan = options.dryRun
-    ? loadFixturePlan()
+    ? loadFixturePlan(options)
     : await generateLivePlan({ ...options, count });
 
   process.stdout.write(`${renderTestPlan(plan)}\n`);
@@ -72,7 +84,7 @@ const DEFAULT_OUT_DIR = "generated-tests";
 /** Renders a plan as a Playwright spec and writes it, reporting what it produced. */
 function writeSpec(plan, { outDir, name }) {
   const { source, stats } = generateSpec(plan);
-  const fileName = `${name ?? slugify(plan.sourceSummary)}.spec.js`;
+  const fileName = `${name ?? slugify(plan.sourceSummary)}${specSuffix(plan)}`;
   const outPath = path.resolve(outDir, fileName);
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
@@ -93,19 +105,46 @@ function writeSpec(plan, { outDir, name }) {
   return { outPath, stats };
 }
 
-function loadFixturePlan() {
+function loadFixturePlan({ spec }) {
+  // --spec picks the API example so a dry run previews the shape the flag
+  // actually produces, rather than a UI plan the user did not ask for.
+  const fixture = spec ? fixtureApiTestPlanPath : fixtureTestPlanPath;
   console.log(pc.dim("Dry run — using the bundled example plan, no API call made."));
   // Validated on the way in, so a broken fixture fails here rather than in the renderer.
-  return parseTestPlan(JSON.parse(fs.readFileSync(fixtureTestPlanPath, "utf8")));
+  return parseTestPlan(JSON.parse(fs.readFileSync(fixture, "utf8")));
 }
 
-async function generateLivePlan({ story: storyPath, text, count, model }) {
-  const story = readStory({ storyPath, text });
+async function generateLivePlan({ story: storyPath, text, spec: specPath, filter, count, model }) {
+  const sources = [storyPath, text, specPath].filter(Boolean);
+  if (sources.length > 1) {
+    throw new Error("Pass only one of --story, --text or --spec.");
+  }
 
-  console.log(pc.dim(`Generating ~${count} test cases with ${model}...`));
   const started = Date.now();
+  let result;
 
-  const { plan, usage } = await generateTestPlan({ story, count, model });
+  if (specPath) {
+    const spec = loadOpenApiFile(specPath);
+    const operations = filterOperations(spec.operations, filter);
+    console.log(
+      pc.dim(
+        `${spec.title}: ${operations.length} of ${spec.operations.length} operations${filter ? ` matching /${filter}/` : ""}`,
+      ),
+    );
+    console.log(pc.dim(`Generating ~${count} API test cases with ${model}...`));
+    result = await generateApiTestPlan({
+      spec,
+      operationsBlock: renderOperations(operations),
+      count,
+      model,
+    });
+  } else {
+    const story = readStory({ storyPath, text });
+    console.log(pc.dim(`Generating ~${count} test cases with ${model}...`));
+    result = await generateTestPlan({ story, count, model });
+  }
+
+  const { plan, usage } = result;
 
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log(
@@ -124,7 +163,7 @@ function readStory({ storyPath, text }) {
 
   if (!storyPath) {
     throw new Error(
-      "No user story given. Pass --story <path> or --text \"...\" (or --dry-run to see an example).",
+      "No input given. Pass --story <path>, --text \"...\" or --spec <openapi.yaml> (or --dry-run to see an example).",
     );
   }
 

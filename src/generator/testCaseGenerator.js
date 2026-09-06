@@ -2,7 +2,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
 import { ModelOutputSchema } from "./schema.js";
-import { SYSTEM_PROMPT, buildUserPrompt } from "./promptTemplates.js";
+import {
+  SYSTEM_PROMPT,
+  buildUserPrompt,
+  API_SYSTEM_PROMPT,
+  buildApiUserPrompt,
+} from "./promptTemplates.js";
 import { GenerationError, MissingApiKeyError } from "../utils/errors.js";
 
 export const DEFAULT_MODEL = "claude-opus-5";
@@ -32,14 +37,57 @@ export async function generateTestPlan({
     });
   }
 
+  return requestPlan({
+    system: SYSTEM_PROMPT,
+    user: buildUserPrompt(story, count),
+    sourceType: "user_story",
+    model,
+    client,
+  });
+}
+
+/**
+ * Asks Claude for an API test plan built from parsed OpenAPI operations.
+ *
+ * @param {object} options
+ * @param {object} options.spec - result of parseOpenApi()
+ * @param {string} options.operationsBlock - rendered endpoint summary
+ * @param {number} [options.count]
+ * @param {string} [options.model]
+ * @param {object} [options.client]
+ */
+export async function generateApiTestPlan({
+  spec,
+  operationsBlock,
+  count = 10,
+  model = DEFAULT_MODEL,
+  client,
+}) {
+  if (!operationsBlock?.trim()) {
+    throw new GenerationError("No endpoints to generate tests for.", {
+      hint: "Loosen or drop --filter; it matched none of the operations in the spec.",
+    });
+  }
+
+  return requestPlan({
+    system: API_SYSTEM_PROMPT,
+    user: buildApiUserPrompt(spec, operationsBlock, count),
+    sourceType: "openapi",
+    model,
+    client,
+  });
+}
+
+/** The one place a request is actually made, so both entrypoints fail alike. */
+async function requestPlan({ system, user, sourceType, model, client }) {
   const anthropic = client ?? createClient();
 
   const response = await anthropic.messages.parse({
     model,
     max_tokens: 16000,
     thinking: { type: "adaptive" },
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: buildUserPrompt(story, count) }],
+    system,
+    messages: [{ role: "user", content: user }],
     output_config: { format: zodOutputFormat(ModelOutputSchema, "test_plan") },
   });
 
@@ -64,7 +112,7 @@ export async function generateTestPlan({
 
   const plan = {
     ...response.parsed_output,
-    sourceType: "user_story",
+    sourceType,
     generatedAt: new Date().toISOString(),
   };
 

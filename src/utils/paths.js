@@ -7,4 +7,5 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const projectRoot = path.resolve(here, "..", "..");
 export const examplesDir = path.join(projectRoot, "examples");
 export const fixtureTestPlanPath = path.join(examplesDir, "fixture-testplan.json");
+export const fixtureApiTestPlanPath = path.join(examplesDir, "fixture-api-testplan.json");
 export const sampleUserStoryPath = path.join(examplesDir, "sample-user-story.txt");

@@ -1,6 +1,16 @@
 import { CATEGORIES } from "./schema.js";
 import { translateAction, translateObservation, quote } from "./stepTranslator.js";
 
+/** Which translation rules and Playwright fixture a plan compiles against. */
+export function specMode(plan) {
+  return plan.sourceType === "openapi" ? "api" : "ui";
+}
+
+/** Spec files are named by mode so playwright.config can give each its own baseURL. */
+export function specSuffix(plan) {
+  return specMode(plan) === "api" ? ".api.spec.js" : ".ui.spec.js";
+}
+
 const CATEGORY_TITLES = {
   happy_path: "Happy path",
   edge_case: "Edge cases",
@@ -21,6 +31,7 @@ const INDENT = "  ";
  * @returns {{source: string, stats: object}}
  */
 export function generateSpec(plan) {
+  const mode = specMode(plan);
   const stats = {
     tests: 0,
     runnable: 0,
@@ -35,12 +46,12 @@ export function generateSpec(plan) {
     const cases = plan.testCases.filter((testCase) => testCase.category === category);
     if (cases.length === 0) continue;
 
-    const body = cases.map((testCase) => renderTestCase(testCase, stats)).join("\n\n");
+    const body = cases.map((testCase) => renderTestCase(testCase, stats, mode)).join("\n\n");
     blocks.push(`test.describe(${quote(CATEGORY_TITLES[category])}, () => {\n${body}\n});`);
   }
 
-  const source = [header(plan), PREAMBLE, blocks.join("\n\n"), ""].join("\n");
-  return { source, stats };
+  const source = [header(plan), PREAMBLE[mode], blocks.join("\n\n"), ""].join("\n");
+  return { source, stats, mode };
 }
 
 function header(plan) {
@@ -56,7 +67,7 @@ function header(plan) {
   ].join("\n");
 }
 
-const PREAMBLE = `
+const UI_PREAMBLE = `
 import { test, expect } from '@playwright/test';
 
 /** Matches a form control by its visible label, falling back to placeholder text. */
@@ -68,7 +79,14 @@ const clickable = (page, name) =>
   page.getByRole('button', { name }).or(page.getByRole('link', { name })).first();
 `;
 
-function renderTestCase(testCase, stats) {
+// API specs need no locator helpers — the request fixture is the whole surface.
+const API_PREAMBLE = `
+import { test, expect } from '@playwright/test';
+`;
+
+const PREAMBLE = { ui: UI_PREAMBLE, api: API_PREAMBLE };
+
+function renderTestCase(testCase, stats, mode) {
   const lines = [];
   const unresolved = [];
   let assertions = 0;
@@ -82,7 +100,7 @@ function renderTestCase(testCase, stats) {
     stats.steps += 1;
     lines.push(`${INDENT.repeat(2)}// ${index + 1}. ${step.action}`);
 
-    const action = translateAction(step.action);
+    const action = translateAction(step.action, mode);
     if (action.resolved) {
       stats.translatedSteps += 1;
       lines.push(...indent(action.statements, 2));
@@ -91,7 +109,7 @@ function renderTestCase(testCase, stats) {
       lines.push(`${INDENT.repeat(2)}// TODO: translate this step`);
     }
 
-    const observation = translateObservation(step.expectedObservation);
+    const observation = translateObservation(step.expectedObservation, mode);
     if (observation.statements.length > 0) {
       assertions += observation.statements.length;
       lines.push(...indent(observation.statements, 2));
@@ -104,7 +122,7 @@ function renderTestCase(testCase, stats) {
   });
 
   lines.push(`${INDENT.repeat(2)}// Expect: ${testCase.expectedResult}`);
-  const outcome = translateObservation(testCase.expectedResult);
+  const outcome = translateObservation(testCase.expectedResult, mode);
   if (outcome.statements.length > 0) {
     assertions += outcome.statements.length;
     lines.push(...indent(outcome.statements, 2));
@@ -125,10 +143,18 @@ function renderTestCase(testCase, stats) {
   const title = `${testCase.id} · ${testCase.title}`;
   const opener = needsWork ? "test.fixme" : "test";
   const notes = needsWork ? renderNotes(unresolved, assertions) : [];
+  const fixture = mode === "api" ? "request" : "page";
+
+  // Every generated request assigns to one binding, declared here so a case
+  // can make several calls in sequence.
+  const preamble = lines.some((line) => line.includes("response = await request."))
+    ? [`${INDENT.repeat(2)}let response;`, ""]
+    : [];
 
   return [
     ...notes,
-    `${INDENT}${opener}(${quote(title)}, async ({ page }) => {`,
+    `${INDENT}${opener}(${quote(title)}, async ({ ${fixture} }) => {`,
+    ...preamble,
     ...lines,
     `${INDENT}});`,
   ].join("\n");
