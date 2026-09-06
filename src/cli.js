@@ -19,6 +19,9 @@ import {
   specSuffix,
 } from "./generator/codeGenerator.js";
 import { loadOpenApiFile, filterOperations, renderOperations } from "./openapi/parser.js";
+import { buildReport } from "./report/coverage.js";
+import { renderMarkdown, renderTerminal } from "./report/render.js";
+import { loadPlaywrightResults } from "./report/playwrightResults.js";
 import { parseTestPlan } from "./generator/schema.js";
 import { renderTestPlan } from "./utils/render.js";
 import { describeError } from "./utils/errors.js";
@@ -90,7 +93,7 @@ function writeSpec(plan, { outDir, name }) {
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, source);
 
-  console.log(`\n${pc.green("✓")} Wrote ${pc.bold(path.relative(process.cwd(), outPath))}`);
+  console.log(`\n${pc.green("✓")} Wrote ${pc.bold(displayPath(outPath))}`);
   console.log(pc.dim(`  ${summarizeStats(stats)}`));
 
   if (stats.fixme > 0) {
@@ -100,7 +103,7 @@ function writeSpec(plan, { outDir, name }) {
       ),
     );
   }
-  console.log(pc.dim(`  Run them with: npx playwright test ${path.relative(process.cwd(), outPath)}`));
+  console.log(pc.dim(`  Run them with: npx playwright test ${displayPath(outPath)}`));
 
   return { outPath, stats };
 }
@@ -175,6 +178,38 @@ function readStory({ storyPath, text }) {
 }
 
 program
+  .command("report")
+  .description("Summarise a test plan's coverage, gaps, and automation status")
+  .requiredOption("-p, --plan <path>", "path to a test plan JSON file")
+  .option("-r, --results <path>", "Playwright JSON report, to fold in pass/fail")
+  .option("-o, --out <path>", "write a Markdown report to this path")
+  .option("--fail-on-gaps", "exit non-zero if any high-severity gap is found", false)
+  .action((options) => {
+    try {
+      const plan = readPlan(options.plan);
+      const outcomes = options.results ? loadPlaywrightResults(options.results) : undefined;
+      const report = buildReport(plan, outcomes);
+
+      process.stdout.write(`${renderTerminal(report)}\n`);
+
+      if (options.out) {
+        const outPath = path.resolve(options.out);
+        fs.mkdirSync(path.dirname(outPath), { recursive: true });
+        fs.writeFileSync(outPath, renderMarkdown(report));
+        console.log(pc.dim(`Wrote ${displayPath(outPath)}`));
+      }
+
+      // Reporting is informational by default; failing a build on it is an
+      // explicit opt-in, so dropping the command into a script cannot break it.
+      if (options.failOnGaps && report.gaps.some((gap) => gap.severity === "high")) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      reportError(error);
+    }
+  });
+
+program
   .command("codegen")
   .description("Turn a saved test plan into a Playwright spec file")
   .requiredOption("-p, --plan <path>", "path to a test plan JSON file")
@@ -182,21 +217,33 @@ program
   .option("-n, --name <name>", "base name for the spec file (without .spec.js)")
   .action((options) => {
     try {
-      const planPath = path.resolve(options.plan);
-      if (!fs.existsSync(planPath)) {
-        throw new Error(`No such file: ${planPath}`);
-      }
-      // Validated on the way in: a hand-edited plan fails here with a schema
-      // error rather than producing a broken spec file.
-      const plan = parseTestPlan(JSON.parse(fs.readFileSync(planPath, "utf8")));
-      writeSpec(plan, { outDir: options.outDir, name: options.name });
+      writeSpec(readPlan(options.plan), { outDir: options.outDir, name: options.name });
     } catch (error) {
-      const { message, hint } = describeError(error);
-      console.error(`\n${pc.red("✗")} ${message}`);
-      if (hint) console.error(`  ${pc.dim(hint)}`);
-      console.error("");
-      process.exitCode = 1;
+      reportError(error);
     }
   });
+
+/** Reads and validates a plan: a hand-edited file fails here, not downstream. */
+function readPlan(planPath) {
+  const resolved = path.resolve(planPath);
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`No such file: ${resolved}`);
+  }
+  return parseTestPlan(JSON.parse(fs.readFileSync(resolved, "utf8")));
+}
+
+/** Relative when it stays inside the project, absolute when it escapes it. */
+function displayPath(target) {
+  const relative = path.relative(process.cwd(), target);
+  return relative.startsWith("..") ? target : relative;
+}
+
+function reportError(error) {
+  const { message, hint } = describeError(error);
+  console.error(`\n${pc.red("✗")} ${message}`);
+  if (hint) console.error(`  ${pc.dim(hint)}`);
+  console.error("");
+  process.exitCode = 1;
+}
 
 program.parse();

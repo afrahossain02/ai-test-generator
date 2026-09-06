@@ -7,3 +7,4 @@ generated-tests/
 test-results/
 playwright-report/
 blob-report/
+.playwright-results.json

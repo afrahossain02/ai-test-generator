@@ -1,4 +1,4 @@
-import { CATEGORIES } from "./schema.js";
+import { CATEGORIES, CATEGORY_LABELS } from "./schema.js";
 import { translateAction, translateObservation, quote } from "./stepTranslator.js";
 
 /** Which translation rules and Playwright fixture a plan compiles against. */
@@ -10,14 +10,6 @@ export function specMode(plan) {
 export function specSuffix(plan) {
   return specMode(plan) === "api" ? ".api.spec.js" : ".ui.spec.js";
 }
-
-const CATEGORY_TITLES = {
-  happy_path: "Happy path",
-  edge_case: "Edge cases",
-  negative: "Negative",
-  boundary: "Boundary",
-  security: "Security",
-};
 
 const INDENT = "  ";
 
@@ -39,6 +31,9 @@ export function generateSpec(plan) {
     steps: 0,
     translatedSteps: 0,
     assertions: 0,
+    // Per-case detail, so a coverage report can say which cases are automated
+    // rather than only how many.
+    cases: [],
   };
 
   const blocks = [];
@@ -47,7 +42,7 @@ export function generateSpec(plan) {
     if (cases.length === 0) continue;
 
     const body = cases.map((testCase) => renderTestCase(testCase, stats, mode)).join("\n\n");
-    blocks.push(`test.describe(${quote(CATEGORY_TITLES[category])}, () => {\n${body}\n});`);
+    blocks.push(`test.describe(${quote(CATEGORY_LABELS[category])}, () => {\n${body}\n});`);
   }
 
   const source = [header(plan), PREAMBLE[mode], blocks.join("\n\n"), ""].join("\n");
@@ -139,6 +134,16 @@ function renderTestCase(testCase, stats, mode) {
   stats.assertions += assertions;
   if (needsWork) stats.fixme += 1;
   else stats.runnable += 1;
+
+  stats.cases.push({
+    id: testCase.id,
+    title: testCase.title,
+    category: testCase.category,
+    priority: testCase.priority,
+    automated: !needsWork,
+    assertions,
+    unresolved: [...unresolved],
+  });
 
   const title = `${testCase.id} · ${testCase.title}`;
   const opener = needsWork ? "test.fixme" : "test";

@@ -17,7 +17,8 @@
     "test": "vitest run",
     "test:generated": "npm run codegen && playwright test",
     "check": "for f in $(find src -name '*.js'); do node --check \"$f\" || exit 1; done && node --check playwright.config.js",
-    "demo:api": "node src/cli.js generate --spec examples/jsonplaceholder-openapi.yaml --dry-run"
+    "demo:api": "node src/cli.js generate --spec examples/jsonplaceholder-openapi.yaml --dry-run",
+    "report": "npm run codegen && playwright test --reporter=json > .playwright-results.json && node src/cli.js report --plan examples/fixture-api-testplan.json --results .playwright-results.json --out docs/example-coverage-report.md"
   },
   "keywords": [
     "testing",

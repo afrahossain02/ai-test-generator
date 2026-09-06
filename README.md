@@ -2,7 +2,7 @@
 
 Turns user stories and OpenAPI specs into structured test cases and runnable Playwright specs — cutting test design time while surfacing the edge cases that get missed by hand.
 
-> **Status: Phase 3.** The CLI takes a user story *or* an OpenAPI/Swagger document, generates a schema-validated test plan, and compiles it into Playwright specs — browser tests for stories, `request`-fixture API tests for specs. Next up is the coverage report — see the [roadmap](#roadmap).
+> **Status: Phase 4.** The CLI takes a user story *or* an OpenAPI/Swagger document, generates a schema-validated test plan, compiles it into Playwright specs, and reports on what the plan covers, what it misses, and how the last run went. Only self-healing is left — see the [roadmap](#roadmap).
 
 ---
 
@@ -102,6 +102,39 @@ A test with no assertions is treated the same way, because a test that asserts n
 
 Both skips in the demo are exactly this. `TC-006` wants a DOM attribute check for a masked password field; `TC-010` wants a response-latency budget. Neither is expressible in the current rules, so both are left honestly marked for you to finish rather than quietly dropped or faked.
 
+## Coverage report
+
+```bash
+npm run report
+```
+
+```
+Coverage report
+Posts and users endpoints of the JSONPlaceholder API.
+
+  10 cases · 9 automated (90%) · 21 assertions
+  Last run: 9 passed · 0 failed · 1 skipped
+
+  Happy path: 4  |  Edge cases: 2  |  Negative: 2  |  Boundary: 1  |  Security: 1
+
+  Gaps to review
+
+  [Low] Only one boundary case, against 4 elsewhere.
+        Uneven depth usually means a category was filled to satisfy the format rather than the risk.
+```
+
+A committed example of the Markdown output: **[docs/example-coverage-report.md](docs/example-coverage-report.md)**.
+
+Three things make this more than a pretty-printer:
+
+**Automation figures come from the real code generator.** The report compiles the plan to get them, so it cannot claim a case is automated when codegen would leave it as `test.fixme`.
+
+**It folds in an actual run.** Give it `--results` from `playwright test --reporter=json` and each case carries its last outcome, with failures surfaced next to the rationale explaining what that case was protecting.
+
+**Gaps are mechanical, not vague.** Every finding names a fact you can verify in seconds — "no security cases at all", "1 P0 case could not be automated: TC-006" — rather than advising you to consider more coverage. `--fail-on-gaps` turns a high-severity finding into a non-zero exit for CI.
+
+The "why this matters" text is not a second AI call. The model wrote each `rationale` at generation time; asking again would cost money to get a differently-worded answer to a question already answered.
+
 ## Before / after
 
 <!-- TODO-measure: the manual baseline needs a timed human run to be honest. -->
@@ -146,6 +179,11 @@ node src/cli.js codegen --plan examples/fixture-api-testplan.json --name jsonpla
 npx playwright test
 npx playwright test --project=api
 
+# Report on coverage, gaps and the last run
+node src/cli.js report --plan examples/fixture-api-testplan.json
+npx playwright test --reporter=json > results.json
+node src/cli.js report --plan plan.json --results results.json --out coverage.md
+
 # Point the generated tests at another environment
 UI_BASE_URL=https://staging.example.com npx playwright test --project=ui
 API_BASE_URL=https://api.staging.example.com npx playwright test --project=api
@@ -175,16 +213,26 @@ Exactly one of `--story`, `--text` or `--spec` is required.
 | `-o, --out-dir <dir>` | Where to write the spec (default `generated-tests`) |
 | `-n, --name <name>` | Base filename; `.ui.spec.js` or `.api.spec.js` is appended by mode |
 
+### `report`
+
+| Option | Description |
+|---|---|
+| `-p, --plan <path>` | Test plan JSON to report on (required) |
+| `-r, --results <path>` | Playwright JSON report, to fold in pass/fail |
+| `-o, --out <path>` | Also write the report as Markdown |
+| `--fail-on-gaps` | Exit non-zero if any high-severity gap is found |
+
 `--filter` matters on real specs. A production OpenAPI document can declare hundreds of operations; handing all of them to one prompt produces a shallow plan and a large bill. Generate per resource instead.
 
 ## Development
 
 ```bash
-npm test                # 105 unit tests, no network, no API calls
+npm test                # 133 unit tests, no network, no API calls
 npm run check           # syntax gate across src/
 npm run demo            # user-story plan rendering, offline
 npm run demo:api        # OpenAPI plan rendering, offline
 npm run test:generated  # codegen + real Playwright run, UI and API
+npm run report          # the above, plus a refreshed coverage report
 ```
 
 The unit tests never hit the API: the generator takes an injectable client, and three guards run offline —
@@ -206,6 +254,10 @@ src/
     codeGenerator.js           TestPlan → .spec.js source, branching on sourceType
   openapi/
     parser.js                  OpenAPI 3 / Swagger 2 → flat operations, filter, summary
+  report/
+    coverage.js                Plan + run → coverage, gaps, automation status
+    playwrightResults.js       Playwright JSON report → per-case outcomes
+    render.js                  Markdown and terminal report output
   utils/
     render.js                  Terminal output
     errors.js                  Typed SDK errors → actionable messages
@@ -217,6 +269,8 @@ examples/
   saucedemo-testplan.json      UI plan behind `npm run test:generated`
   jsonplaceholder-openapi.yaml OpenAPI spec for the API demo
   fixture-api-testplan.json    API plan behind `npm run test:generated`
+docs/
+  example-coverage-report.md   Committed sample of the Markdown report
 tests/                         Vitest, offline
 playwright.config.js           ui and api projects, each with its own baseURL
 ```
@@ -230,10 +284,10 @@ playwright.config.js           ui and api projects, each with its own baseURL
 | 1 | CLI takes a user story, generates a validated test case list | **Done** |
 | 2 | Compile the plan into runnable Playwright `.spec.js` files | **Done** |
 | 3 | Accept an OpenAPI/Swagger spec and generate API test cases | **Done** |
-| 4 | Coverage report — surface *why* each edge case matters | Next |
-| 5 | Self-healing: on failure, suggest a locator or assertion fix | Stretch |
+| 4 | Coverage report — surface *why* each edge case matters | **Done** |
+| 5 | Self-healing: on failure, suggest a locator or assertion fix | Next (stretch) |
 
-Phase 4 is mostly rendering work already: every generated case carries a `rationale`.
+Phase 5 is the one place a second model call clearly earns its cost: a failing test plus the page snapshot is exactly the kind of input a model is better at than a rule.
 
 ## License
 

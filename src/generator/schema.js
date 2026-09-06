@@ -25,6 +25,15 @@ export const CATEGORIES = [
 
 export const PRIORITIES = ["P0", "P1", "P2"];
 
+/** Display names, shared by the renderer, the code generator and the report. */
+export const CATEGORY_LABELS = {
+  happy_path: "Happy path",
+  edge_case: "Edge cases",
+  negative: "Negative",
+  boundary: "Boundary",
+  security: "Security",
+};
+
 export const TestStepSchema = z.object({
   action: z
     .string()

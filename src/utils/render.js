@@ -1,14 +1,6 @@
 import pc from "picocolors";
 
-import { CATEGORIES, countByCategory } from "../generator/schema.js";
-
-const CATEGORY_LABELS = {
-  happy_path: "Happy path",
-  edge_case: "Edge cases",
-  negative: "Negative",
-  boundary: "Boundary",
-  security: "Security",
-};
+import { CATEGORIES, CATEGORY_LABELS, countByCategory } from "../generator/schema.js";
 
 const CATEGORY_COLORS = {
   happy_path: pc.green,
