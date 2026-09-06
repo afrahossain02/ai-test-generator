@@ -5,7 +5,11 @@ import {
   buildUserPrompt,
   API_SYSTEM_PROMPT,
   buildApiUserPrompt,
+  buildHealPrompt,
+  UI_STEP_PHRASINGS,
+  API_STEP_PHRASINGS,
 } from "../src/generator/promptTemplates.js";
+import { translateAction, translateObservation } from "../src/generator/stepTranslator.js";
 import { CATEGORIES } from "../src/generator/schema.js";
 
 describe("prompts", () => {
@@ -74,3 +78,63 @@ describe("API prompts", () => {
     expect(prompt).toContain('<api title="X">');
   });
 });
+
+describe("the phrasing contract", () => {
+  // The prompts and the translator rules are a matched pair. If a rule exists
+  // that no prompt teaches, the model never emits it and the rule is dead
+  // code; if a prompt teaches a shape no rule compiles, every case using it
+  // lands as test.fixme. These assertions are what keep them together.
+  it("teaches a UI phrasing that each UI action rule can actually compile", () => {
+    for (const line of actionLines(UI_STEP_PHRASINGS)) {
+      expect(translateAction(line, "ui").resolved, `UI prompt teaches "${line}" but no rule compiles it`).toBe(true);
+    }
+  });
+
+  it("teaches a UI observation that each UI rule can compile", () => {
+    for (const line of observationLines(UI_STEP_PHRASINGS)) {
+      expect(translateObservation(line, "ui").resolved, `UI prompt teaches "${line}" but no rule compiles it`).toBe(true);
+    }
+  });
+
+  it("teaches an API phrasing that each API action rule can compile", () => {
+    for (const line of actionLines(API_STEP_PHRASINGS)) {
+      expect(translateAction(line, "api").resolved, `API prompt teaches "${line}" but no rule compiles it`).toBe(true);
+    }
+  });
+
+  it("teaches an API observation that each API rule can compile", () => {
+    for (const line of observationLines(API_STEP_PHRASINGS)) {
+      expect(translateObservation(line, "api").resolved, `API prompt teaches "${line}" but no rule compiles it`).toBe(true);
+    }
+  });
+
+  it("is reachable from both generator prompts and the healer prompt", () => {
+    expect(SYSTEM_PROMPT).toContain(UI_STEP_PHRASINGS);
+    expect(API_SYSTEM_PROMPT).toContain(API_STEP_PHRASINGS);
+    expect(buildHealPrompt("ui", healCaseFixture, "err", "obs")).toContain(UI_STEP_PHRASINGS);
+    expect(buildHealPrompt("api", healCaseFixture, "err", "obs")).toContain(API_STEP_PHRASINGS);
+  });
+});
+
+const healCaseFixture = {
+  id: "TC-001",
+  title: "T",
+  category: "happy_path",
+  priority: "P0",
+  rationale: "r",
+  preconditions: [],
+  steps: [{ action: "Navigate to /", expectedObservation: "" }],
+  expectedResult: "x",
+};
+
+function section(block, heading) {
+  const [, body = ""] = block.split(`${heading}:`);
+  return body
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.endsWith(":"))
+    .filter((line) => !/^(Observations|Actions)/.test(line));
+}
+
+const actionLines = (block) => section(block.split("Observations")[0], "Actions");
+const observationLines = (block) => section(block, "Observations and expected results");

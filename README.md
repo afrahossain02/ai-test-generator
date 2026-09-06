@@ -2,7 +2,7 @@
 
 Turns user stories and OpenAPI specs into structured test cases and runnable Playwright specs — cutting test design time while surfacing the edge cases that get missed by hand.
 
-> **Status: Phase 4.** The CLI takes a user story *or* an OpenAPI/Swagger document, generates a schema-validated test plan, compiles it into Playwright specs, and reports on what the plan covers, what it misses, and how the last run went. Only self-healing is left — see the [roadmap](#roadmap).
+> **Status: all five phases complete.** The CLI takes a user story *or* an OpenAPI/Swagger document, generates a schema-validated test plan, compiles it into Playwright specs, reports on coverage and gaps, and — when a test fails — probes the live target and proposes a repair grounded in what is actually there.
 
 ---
 
@@ -135,6 +135,47 @@ Three things make this more than a pretty-printer:
 
 The "why this matters" text is not a second AI call. The model wrote each `rationale` at generation time; asking again would cost money to get a differently-worded answer to a question already answered.
 
+## Self-healing
+
+When a generated test fails, `heal` re-opens the live target, replays the case's own steps to reach the state the assertion ran against, and reports what is actually there:
+
+```bash
+npm run demo:heal
+```
+
+```
+2 failing cases · probing https://www.saucedemo.com
+
+TC-001 · Valid credentials land the shopper on the product catalogue
+  Failure: Test timeout of 30000ms exceeded.
+
+  The case's own steps were replayed to reach this state:
+    1. Navigate to / — ok
+    2. Type "standard_user" into the Username field — ok
+    3. Type "secret_sauce" into the Password field — ok
+    4. Click the "Log In" button — failed: locator.click: Timeout 4000ms exceeded.
+
+  Visible elements:
+    role=textbox name="Username" placeholder="Username" testid="username" id="user-name"
+    role=textbox name="Password" placeholder="Password" testid="password" id="password"
+    role=button  name="Login"    testid="login-button"  id="login-button"
+```
+
+The test asked for `"Log In"`. The page has `"Login"`. That is a repair with a checkable answer, not a guess.
+
+**Grounding is the whole design.** Asking a model to fix a locator from an error message alone invites a confident guess at a selector that does not exist either. Handing it the elements really on the page turns "invent a locator" into "pick the right one".
+
+**Replaying the steps matters more than it sounds.** An assertion usually fails on a state the user reached — the login error appears *after* submitting, not on the landing page. Without the replay, both failures above would show identical evidence. With it, the second case's observation contains the real message text the assertion should have been checking.
+
+**It is allowed to refuse.** Every diagnosis returns a verdict: `test_is_wrong`, `application_is_wrong`, or `unclear`. Only the first is ever applied, and only at or above a confidence floor. A tool that rewrites tests until they pass destroys the only thing tests were for — so when the application looks like the guilty party, `heal` reports a suspected defect and changes nothing.
+
+**Repairs edit the plan, not the generated spec.** The spec is build output; the next `codegen` would throw a patched spec away. Fixing the plan makes the repair survive regeneration.
+
+```bash
+node src/cli.js heal --plan plan.json --results results.json --out plan.json
+npm run codegen   # the repair is now baked into the specs
+```
+
 ## Before / after
 
 <!-- TODO-measure: the manual baseline needs a timed human run to be honest. -->
@@ -179,6 +220,10 @@ node src/cli.js codegen --plan examples/fixture-api-testplan.json --name jsonpla
 npx playwright test
 npx playwright test --project=api
 
+# Diagnose failures against the live target
+node src/cli.js heal --plan plan.json --results results.json --dry-run
+node src/cli.js heal --plan plan.json --results results.json --out repaired.json
+
 # Report on coverage, gaps and the last run
 node src/cli.js report --plan examples/fixture-api-testplan.json
 npx playwright test --reporter=json > results.json
@@ -222,24 +267,36 @@ Exactly one of `--story`, `--text` or `--spec` is required.
 | `-o, --out <path>` | Also write the report as Markdown |
 | `--fail-on-gaps` | Exit non-zero if any high-severity gap is found |
 
+### `heal`
+
+| Option | Description |
+|---|---|
+| `-p, --plan <path>` | Test plan the failing tests came from (required) |
+| `-r, --results <path>` | Playwright JSON report from the failing run (required) |
+| `-b, --base-url <url>` | Target to probe (defaults to the host the tests ran against) |
+| `-o, --out <path>` | Write the repaired plan here |
+| `--min-confidence <level>` | Only apply at or above this level (default `medium`) |
+| `-d, --dry-run` | Probe and show the evidence, but make no API call |
+
 `--filter` matters on real specs. A production OpenAPI document can declare hundreds of operations; handing all of them to one prompt produces a shallow plan and a large bill. Generate per resource instead.
 
 ## Development
 
 ```bash
-npm test                # 133 unit tests, no network, no API calls
+npm test                # 168 unit tests, no network, no API calls
 npm run check           # syntax gate across src/
 npm run demo            # user-story plan rendering, offline
 npm run demo:api        # OpenAPI plan rendering, offline
 npm run test:generated  # codegen + real Playwright run, UI and API
 npm run report          # the above, plus a refreshed coverage report
+npm run demo:heal       # break two cases on purpose, run them, probe the live page
 ```
 
 The unit tests never hit the API: the generator takes an injectable client, and three guards run offline —
 
 - `outputFormat.test.js` converts the Zod schema to a strict JSON schema locally, so an SDK or Zod upgrade fails in CI rather than at request time.
 - `codeGenerator.test.js` runs `node --check` over the generated source, so a malformed emission is caught before Playwright sees it. This caught a real bug: a URL assertion rendering as `toHaveURL(//sign-in/)`, where the unescaped slash turned the regex into a line comment.
-- `prompt.test.js` asserts the API prompt teaches every phrasing the API rules can compile, so the two cannot drift apart silently.
+- `prompt.test.js` round-trips every phrasing the prompts teach back through the translator, so a taught shape that no rule compiles — or a rule no prompt teaches — fails the suite. This has caught two real defects: a `does not contain` rule that no prompt taught (dead code), and a `field is visible` rule that was case-sensitive on "the", so a sentence starting with "The" never matched it.
 
 ## Project structure
 
@@ -254,6 +311,12 @@ src/
     codeGenerator.js           TestPlan → .spec.js source, branching on sourceType
   openapi/
     parser.js                  OpenAPI 3 / Swagger 2 → flat operations, filter, summary
+  heal/
+    probe.js                   Replays steps on the live target, observes reality
+    target.js                  Which page or endpoint a failing case was using
+    healer.js                  The grounded diagnosis call
+    apply.js                   Verdict/confidence gating, patching, diffs
+    schema.js                  Zod schema for a diagnosis
   report/
     coverage.js                Plan + run → coverage, gaps, automation status
     playwrightResults.js       Playwright JSON report → per-case outcomes
@@ -269,6 +332,7 @@ examples/
   saucedemo-testplan.json      UI plan behind `npm run test:generated`
   jsonplaceholder-openapi.yaml OpenAPI spec for the API demo
   fixture-api-testplan.json    API plan behind `npm run test:generated`
+  broken-saucedemo-testplan.json  Two deliberately broken cases, for the heal demo
 docs/
   example-coverage-report.md   Committed sample of the Markdown report
 tests/                         Vitest, offline
@@ -285,9 +349,9 @@ playwright.config.js           ui and api projects, each with its own baseURL
 | 2 | Compile the plan into runnable Playwright `.spec.js` files | **Done** |
 | 3 | Accept an OpenAPI/Swagger spec and generate API test cases | **Done** |
 | 4 | Coverage report — surface *why* each edge case matters | **Done** |
-| 5 | Self-healing: on failure, suggest a locator or assertion fix | Next (stretch) |
+| 5 | Self-healing: on failure, suggest a locator or assertion fix | **Done** |
 
-Phase 5 is the one place a second model call clearly earns its cost: a failing test plus the page snapshot is exactly the kind of input a model is better at than a rule.
+This is the one place a second model call earns its cost. Everything else — step translation, coverage, gap detection — is deterministic, because a parsing problem does not need a language model.
 
 ## License
 

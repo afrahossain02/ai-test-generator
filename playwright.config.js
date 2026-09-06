@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+import { uiBaseUrl, apiBaseUrl } from "./src/utils/baseUrls.js";
+
 /**
  * Runs the specs written into generated-tests/ by `ai-testgen codegen`.
  *
@@ -25,14 +27,14 @@ export default defineConfig({
       testMatch: /.*\.ui\.spec\.js$/,
       use: {
         ...devices["Desktop Chrome"],
-        baseURL: process.env.UI_BASE_URL ?? "https://www.saucedemo.com",
+        baseURL: uiBaseUrl(),
       },
     },
     {
       name: "api",
       testMatch: /.*\.api\.spec\.js$/,
       use: {
-        baseURL: process.env.API_BASE_URL ?? "https://jsonplaceholder.typicode.com",
+        baseURL: apiBaseUrl(),
       },
     },
   ],

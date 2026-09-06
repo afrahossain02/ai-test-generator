@@ -26,11 +26,20 @@ function urlPattern(value) {
   return `/${escaped}/`;
 }
 
-const UI_ACTION_RULES = [
+/**
+ * UI actions are parsed into an *intent* first, then rendered as code.
+ *
+ * Two consumers need the same understanding of a step: the code generator,
+ * which turns it into a Playwright call, and the heal replayer, which drives a
+ * live page to reproduce the state a failing assertion ran against. Parsing
+ * twice would let the two drift, so the phrasing lives here once and each
+ * consumer renders the intent its own way.
+ */
+const UI_INTENTS = [
   {
     name: "navigate",
     pattern: /^(?:navigate|go|browse)\s+to\s+(\S+)/i,
-    build: (match) => [`await page.goto(${quote(match[1])});`],
+    intent: (match) => ({ kind: "goto", path: match[1] }),
   },
   {
     name: "fill",
@@ -38,49 +47,87 @@ const UI_ACTION_RULES = [
     // genuinely ambiguous and should stay unresolved rather than be invented.
     pattern:
       /^(?:type|enter|input|fill(?:\s+in)?)\s+"([^"]*)"\s+(?:in|into)\s+the\s+(.+?)\s+(?:field|input|box)\b/i,
-    build: (match) => [`await field(page, ${quote(match[2])}).fill(${quote(match[1])});`],
+    intent: (match) => ({ kind: "fill", field: match[2], value: match[1] }),
   },
   {
     name: "clearField",
     pattern: /^clear\s+the\s+(.+?)\s+(?:field|input|box)\b/i,
-    build: (match) => [`await field(page, ${quote(match[1])}).clear();`],
+    intent: (match) => ({ kind: "clear", field: match[1] }),
   },
   {
     name: "clickButton",
     pattern: /^click\s+(?:on\s+)?the\s+"([^"]+)"\s+button\b/i,
-    build: (match) => [`await page.getByRole('button', { name: ${quote(match[1])} }).click();`],
+    intent: (match) => ({ kind: "clickRole", role: "button", name: match[1] }),
   },
   {
     name: "clickLink",
     pattern: /^click\s+(?:on\s+)?the\s+"([^"]+)"\s+link\b/i,
-    build: (match) => [`await page.getByRole('link', { name: ${quote(match[1])} }).click();`],
+    intent: (match) => ({ kind: "clickRole", role: "link", name: match[1] }),
   },
   {
     name: "clickNamed",
     pattern: /^click\s+(?:on\s+)?"([^"]+)"/i,
-    build: (match) => [`await clickable(page, ${quote(match[1])}).click();`],
+    intent: (match) => ({ kind: "clickAny", name: match[1] }),
   },
   {
     name: "check",
     pattern: /^(?:check|tick)\s+the\s+"([^"]+)"\s+(?:checkbox|box)\b/i,
-    build: (match) => [`await field(page, ${quote(match[1])}).check();`],
+    intent: (match) => ({ kind: "check", field: match[1], checked: true }),
   },
   {
     name: "uncheck",
     pattern: /^un(?:check|tick)\s+the\s+"([^"]+)"\s+(?:checkbox|box)\b/i,
-    build: (match) => [`await field(page, ${quote(match[1])}).uncheck();`],
+    intent: (match) => ({ kind: "check", field: match[1], checked: false }),
   },
   {
     name: "select",
     pattern: /^(?:select|choose)\s+"([^"]+)"\s+from\s+the\s+(.+?)\s+(?:dropdown|select|menu|list)\b/i,
-    build: (match) => [`await field(page, ${quote(match[2])}).selectOption(${quote(match[1])});`],
+    intent: (match) => ({ kind: "select", field: match[2], value: match[1] }),
   },
   {
     name: "press",
     pattern: /^press\s+(?:the\s+)?"?([A-Za-z]+)"?\s*(?:key)?$/i,
-    build: (match) => [`await page.keyboard.press(${quote(capitalize(match[1]))});`],
+    intent: (match) => ({ kind: "press", key: capitalize(match[1]) }),
   },
 ];
+
+/** How each intent renders as Playwright source. */
+const UI_CODE = {
+  goto: (intent) => [`await page.goto(${quote(intent.path)});`],
+  fill: (intent) => [`await field(page, ${quote(intent.field)}).fill(${quote(intent.value)});`],
+  clear: (intent) => [`await field(page, ${quote(intent.field)}).clear();`],
+  clickRole: (intent) => [
+    `await page.getByRole('${intent.role}', { name: ${quote(intent.name)} }).click();`,
+  ],
+  clickAny: (intent) => [`await clickable(page, ${quote(intent.name)}).click();`],
+  check: (intent) => [
+    `await field(page, ${quote(intent.field)}).${intent.checked ? "check" : "uncheck"}();`,
+  ],
+  select: (intent) => [
+    `await field(page, ${quote(intent.field)}).selectOption(${quote(intent.value)});`,
+  ],
+  press: (intent) => [`await page.keyboard.press(${quote(intent.key)});`],
+};
+
+const UI_ACTION_RULES = UI_INTENTS.map((rule) => ({
+  name: rule.name,
+  pattern: rule.pattern,
+  build: (match) => UI_CODE[rule.intent(match).kind](rule.intent(match)),
+}));
+
+/**
+ * The structured intent behind a UI step, or null if none is recognised.
+ * Used by the heal replayer to drive a live page.
+ */
+export function parseUiIntent(action) {
+  const subject = String(action ?? "").trim();
+  for (const rule of UI_INTENTS) {
+    const match = subject.match(rule.pattern);
+    if (match) return { rule: rule.name, ...rule.intent(match) };
+  }
+  return null;
+}
+
 
 const UI_OBSERVATION_RULES = [
   {
@@ -105,7 +152,9 @@ const UI_OBSERVATION_RULES = [
   },
   {
     name: "fieldVisible",
-    pattern: /\bthe\s+([A-Z][\w ]*?)\s+field\s+is\s+(?:visible|shown|displayed)/,
+    // Case-insensitive: this rule used to require a lowercase "the", so a
+    // sentence starting with "The Email field is visible" never matched it.
+    pattern: /\bthe\s+([A-Za-z][\w ]*?)\s+field\s+is\s+(?:visible|shown|displayed)/i,
     build: (match) => [`await expect(field(page, ${quote(match[1].trim())})).toBeVisible();`],
   },
   {
@@ -131,7 +180,6 @@ const UI_OBSERVATION_RULES = [
     build: (match) => [`await expect(page.getByText(${quote(match[1])}).first()).toBeVisible();`],
   },
 ];
-
 
 /**
  * API rules. The prompt in promptTemplates.js teaches the model exactly these

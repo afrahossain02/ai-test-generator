@@ -4,7 +4,11 @@ import { describe, it, expect } from "vitest";
 
 import { buildReport, percent } from "../src/report/coverage.js";
 import { renderMarkdown, renderTerminal } from "../src/report/render.js";
-import { parsePlaywrightResults, lookupStatus } from "../src/report/playwrightResults.js";
+import {
+  parsePlaywrightResults,
+  lookupStatus,
+  collectFailures,
+} from "../src/report/playwrightResults.js";
 import { parseTestPlan } from "../src/generator/schema.js";
 import { fixtureTestPlanPath } from "../src/utils/paths.js";
 
@@ -230,5 +234,71 @@ describe("percent", () => {
 
   it("does not divide by zero", () => {
     expect(percent(0, 0)).toBe(0);
+  });
+});
+
+describe("collectFailures", () => {
+  it("returns only the failing cases, with their error text", () => {
+    const failures = collectFailures({
+      suites: [
+        {
+          specs: [
+            { title: "TC-001 · Fine", file: "a.spec.js", tests: [{ results: [{ status: "passed" }] }] },
+            {
+              title: "TC-002 · Broken",
+              file: "a.spec.js",
+              tests: [{ results: [{ status: "failed", error: { message: "locator not found" } }] }],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ id: "TC-002", title: "Broken", error: "locator not found" });
+  });
+
+  it("strips the colour codes Playwright writes into JSON error messages", () => {
+    const esc = String.fromCharCode(27);
+    const failures = collectFailures({
+      suites: [
+        {
+          specs: [
+            {
+              title: "TC-001 · X",
+              tests: [{ results: [{ status: "failed", error: { message: `${esc}[31mred${esc}[0m` } }] }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(failures[0].error).toBe("red");
+  });
+
+  it("does not repeat the same message once per retry", () => {
+    const failures = collectFailures({
+      suites: [
+        {
+          specs: [
+            {
+              title: "TC-001 · X",
+              tests: [
+                { results: [{ status: "failed", error: { message: "same" } }, { status: "failed", error: { message: "same" } }] },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(failures[0].error).toBe("same");
+  });
+
+  it("ignores a timed-out case's siblings that passed", () => {
+    const failures = collectFailures({
+      suites: [
+        { specs: [{ title: "TC-003 · Slow", tests: [{ results: [{ status: "timedOut", error: { message: "Test timeout" } }] }] }] },
+      ],
+    });
+    expect(failures.map((f) => f.id)).toEqual(["TC-003"]);
   });
 });

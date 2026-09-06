@@ -21,7 +21,13 @@ import {
 import { loadOpenApiFile, filterOperations, renderOperations } from "./openapi/parser.js";
 import { buildReport } from "./report/coverage.js";
 import { renderMarkdown, renderTerminal } from "./report/render.js";
-import { loadPlaywrightResults } from "./report/playwrightResults.js";
+import { loadPlaywrightResults, collectFailures } from "./report/playwrightResults.js";
+import { specMode } from "./generator/codeGenerator.js";
+import { probePage, probeApi, renderObservation } from "./heal/probe.js";
+import { deriveTarget, resolveUrl } from "./heal/target.js";
+import { healCase } from "./heal/healer.js";
+import { applySuggestions, renderDecisions } from "./heal/apply.js";
+import { uiBaseUrl, apiBaseUrl } from "./utils/baseUrls.js";
 import { parseTestPlan } from "./generator/schema.js";
 import { renderTestPlan } from "./utils/render.js";
 import { describeError } from "./utils/errors.js";
@@ -208,6 +214,129 @@ program
       reportError(error);
     }
   });
+
+program
+  .command("heal")
+  .description("Diagnose failing tests against the live target and suggest plan repairs")
+  .requiredOption("-p, --plan <path>", "path to the test plan JSON")
+  .requiredOption("-r, --results <path>", "Playwright JSON report from the failing run")
+  .option("-b, --base-url <url>", "target to probe (defaults to the same host the tests ran against)")
+  .option("-o, --out <path>", "write the repaired plan to this path")
+  .option("--min-confidence <level>", "only apply suggestions at or above this level", "medium")
+  .option("-d, --dry-run", "probe and show the evidence, but make no API call", false)
+  .option("-m, --model <id>", "model to use", process.env.AI_TESTGEN_MODEL || DEFAULT_MODEL)
+  .action(async (options) => {
+    try {
+      await runHeal(options);
+    } catch (error) {
+      reportError(error);
+    }
+  });
+
+async function runHeal(options) {
+  const plan = readPlan(options.plan);
+  const mode = specMode(plan);
+  // Validates the file is a real Playwright report and fails helpfully if not.
+  loadPlaywrightResults(options.results);
+  const failures = collectFailures(rawReport(options.results));
+
+  if (failures.length === 0) {
+    console.log(`\n${pc.green("✓")} Nothing failing in that run — nothing to heal.\n`);
+    return;
+  }
+
+  const baseUrl = options.baseUrl ?? (mode === "api" ? apiBaseUrl() : uiBaseUrl());
+  console.log(
+    pc.dim(`${failures.length} failing case${failures.length === 1 ? "" : "s"} · probing ${baseUrl}`),
+  );
+
+  const byId = new Map(plan.testCases.map((testCase) => [testCase.id, testCase]));
+  const suggestions = [];
+
+  for (const failure of failures) {
+    const testCase = byId.get(failure.id);
+    if (!testCase) {
+      console.log(pc.dim(`  ${failure.id} is in the run but not in this plan — skipped.`));
+      continue;
+    }
+
+    const target = deriveTarget(mode, testCase);
+    if (!target) {
+      console.log(pc.dim(`  ${failure.id} has no navigable step to probe — skipped.`));
+      continue;
+    }
+
+    const observed =
+      target.kind === "api"
+        ? await probeApi({ baseUrl, method: target.method, path: target.path, body: target.body })
+        : await probePage({ url: resolveUrl(baseUrl, target.path), steps: testCase.steps });
+
+    const observation = renderObservation(observed);
+
+    if (options.dryRun) {
+      // The probe is free and real; only the diagnosis costs money. Showing the
+      // evidence without calling the model is the useful half of a dry run.
+      console.log(`\n${pc.bold(failure.id)} · ${failure.title}`);
+      console.log(pc.dim(`  Failure: ${firstLine(failure.error)}`));
+      console.log(pc.dim(indentBlock(observation)));
+      continue;
+    }
+
+    const { suggestion } = await healCase({
+      testCase,
+      error: failure.error,
+      observation,
+      mode,
+      model: options.model,
+    });
+    suggestions.push(suggestion);
+  }
+
+  if (options.dryRun) {
+    console.log(pc.dim("\nDry run — evidence gathered, no diagnosis requested.\n"));
+    return;
+  }
+
+  const { plan: repaired, decisions } = applySuggestions(plan, suggestions, {
+    minConfidence: options.minConfidence,
+  });
+
+  console.log(renderDecisions(plan, decisions));
+
+  const applied = decisions.filter((decision) => decision.applied);
+  const defects = decisions.filter(
+    (decision) => decision.suggestion.verdict === "application_is_wrong",
+  );
+  console.log(
+    `\n${applied.length} repair${applied.length === 1 ? "" : "s"} applied · ` +
+      `${defects.length} suspected defect${defects.length === 1 ? "" : "s"} left alone\n`,
+  );
+
+  if (options.out && applied.length > 0) {
+    const outPath = path.resolve(options.out);
+    fs.writeFileSync(outPath, `${JSON.stringify(repaired, null, 2)}\n`);
+    console.log(pc.dim(`Wrote repaired plan to ${displayPath(outPath)}`));
+    console.log(pc.dim("Regenerate the specs to pick the repairs up: npm run codegen"));
+  } else if (options.out) {
+    console.log(pc.dim("No repairs to write."));
+  }
+}
+
+/** loadPlaywrightResults validates the shape; this re-reads it for the errors. */
+function rawReport(resultsPath) {
+  return JSON.parse(fs.readFileSync(path.resolve(resultsPath), "utf8"));
+}
+
+function firstLine(text) {
+  return String(text).split("\n")[0] ?? "";
+}
+
+function indentBlock(text) {
+  return String(text)
+    .split("\n")
+    .map((line) => `  ${line}`)
+    .join("\n");
+}
 
 program
   .command("codegen")

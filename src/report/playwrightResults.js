@@ -88,11 +88,51 @@ export function loadPlaywrightResults(resultsPath) {
 }
 
 /** Playwright nests suites arbitrarily deep; flatten to the specs. */
-function collectSpecs(node, found = []) {
+export function collectSpecs(node, found = []) {
   if (!node || typeof node !== "object") return found;
   for (const spec of node.specs ?? []) found.push(spec);
   for (const suite of node.suites ?? []) collectSpecs(suite, found);
   return found;
+}
+
+/**
+ * The failing cases in a run, with the error text Playwright recorded.
+ *
+ * This is what self-healing works from: a case id, what it was trying to do,
+ * and the message explaining why it did not.
+ */
+export function collectFailures(report) {
+  const failures = [];
+
+  for (const spec of collectSpecs(report)) {
+    const title = String(spec.title ?? "");
+    const match = title.match(CASE_ID);
+    if (!match || specStatus(spec) !== "failed") continue;
+
+    const results = (spec.tests ?? []).flatMap((test) => test.results ?? []);
+    const errors = results
+      .flatMap((result) => [result.error, ...(result.errors ?? [])])
+      .filter(Boolean)
+      .map((error) => String(error.message ?? error.value ?? "").trim())
+      .filter(Boolean);
+
+    failures.push({
+      id: match[1],
+      title: title.replace(/^TC-\d+\s*\u00B7\s*/, ""),
+      file: spec.file ?? "",
+      // Playwright repeats the same message per retry; one copy is enough.
+      error: stripAnsi([...new Set(errors)].join("\n\n")),
+    });
+  }
+
+  return failures;
+}
+
+// Playwright writes colour codes into error messages even in the JSON report.
+const ANSI = new RegExp(String.fromCharCode(27) + "\\[[0-9;]*m", "g");
+
+function stripAnsi(text) {
+  return text.replace(ANSI, "");
 }
 
 function specStatus(spec) {
