@@ -2,7 +2,7 @@
 
 Turns user stories and OpenAPI specs into structured test cases and runnable Playwright specs — cutting test design time while surfacing the edge cases that get missed by hand.
 
-> **Status: all five phases complete.** The CLI takes a user story *or* an OpenAPI/Swagger document, generates a schema-validated test plan, compiles it into Playwright specs, reports on coverage and gaps, and — when a test fails — probes the live target and proposes a repair grounded in what is actually there.
+> **Status: all five roadmap phases complete, plus the two things a real product needs** — test-id locators and `storageState` authentication. The CLI takes a user story *or* an OpenAPI/Swagger document, generates a schema-validated test plan, compiles it into Playwright specs, reports on coverage and gaps, and — when a test fails — probes the live target and proposes a repair grounded in what is actually there.
 
 ---
 
@@ -135,6 +135,74 @@ Three things make this more than a pretty-printer:
 
 The "why this matters" text is not a second AI call. The model wrote each `rationale` at generation time; asking again would cost money to get a differently-worded answer to a question already answered.
 
+## Using it on a real product
+
+Two things separate the demo from your app: it identifies elements by `data-testid` rather than visible labels, and most of it sits behind a login. Both are supported.
+
+### Locator maps
+
+A plan is written in the words a human uses ("the Username field"). Your app probably identifies that field as `data-test="username"`. The locator map is the seam between the two, so plans stay readable and generated code stays robust.
+
+Build a starter map by probing a page:
+
+```bash
+node src/cli.js locators --url https://staging.yourproduct.com/login --out locators.json
+```
+
+```json
+{
+  "attribute": "data-test",
+  "elements": { "Username": "username", "Password": "password", "Login": "login-button" }
+}
+```
+
+Pass it to codegen and the generated helpers prefer the test id, falling back to label and placeholder for anything unmapped:
+
+```bash
+node src/cli.js codegen --plan plans/checkout.json --locators locators.json --name checkout
+```
+
+The map is written into the spec as a plain attribute selector rather than via Playwright's `testIdAttribute` setting, so a generated file is portable without carrying a config change with it.
+
+### Signing in once
+
+An auth profile describes the sign-in in the same sentence shapes as a test case — signing in is just UI steps, and reusing the translator means the same locator map applies:
+
+```json
+{
+  "name": "standard_user",
+  "url": "/",
+  "steps": [
+    { "action": "Type \"standard_user\" into the Username field", "expectedObservation": "" },
+    { "action": "Click the \"Login\" button", "expectedObservation": "" }
+  ],
+  "expectedResult": "The shopper lands on /inventory.html"
+}
+```
+
+```bash
+npm run demo:auth
+```
+
+```
+✓ Wrote generated-tests/inventory.ui.spec.js
+✓ Wrote generated-tests/auth.setup.js
+  Signs in as standard_user once and saves the session to .auth/user.json.
+
+  ✓ [setup] authenticate as standard_user (2.5s)
+  ✓ [ui] TC-001 · A signed-in shopper reaches the product catalogue directly (3.2s)
+  ✓ [ui] TC-002 · The catalogue lists its products (3.1s)
+  ✓ [ui] TC-003 · The cart is reachable from the catalogue (1.8s)
+
+  4 passed (12.3s)
+```
+
+Those three tests deep-link straight into pages that require a session. Delete `auth.setup.js` and all three fail — the sign-in is doing real work, not decorating a suite that would pass anyway.
+
+**The sign-in is verified before the session is saved.** A profile whose `expectedResult` asserts nothing is refused outright, because saving an unauthenticated cookie jar would hand every dependent test a session that silently is not one. For the same reason, a profile with a single step the translator cannot read is refused rather than partially compiled: a test case with one unreadable step still runs as far as it can, but a sign-in with one authenticates nobody.
+
+**Don't point auth at a suite that tests the login page itself.** Those cases need to start signed out. Keep them in a separate plan and generate them without `--auth`.
+
 ## Self-healing
 
 When a generated test fails, `heal` re-opens the live target, replays the case's own steps to reach the state the assertion ran against, and reports what is actually there:
@@ -257,6 +325,15 @@ Exactly one of `--story`, `--text` or `--spec` is required.
 | `-p, --plan <path>` | Test plan JSON to compile (required) |
 | `-o, --out-dir <dir>` | Where to write the spec (default `generated-tests`) |
 | `-n, --name <name>` | Base filename; `.ui.spec.js` or `.api.spec.js` is appended by mode |
+| `-l, --locators <path>` | Locator map pinning plan names to this app's test ids |
+| `-a, --auth <path>` | Auth profile; also emits the sign-in setup project |
+
+### `locators`
+
+| Option | Description |
+|---|---|
+| `-u, --url <url>` | Page to probe (required) |
+| `-o, --out <path>` | Where to write the map (default `locators.json`) |
 
 ### `report`
 
@@ -283,13 +360,14 @@ Exactly one of `--story`, `--text` or `--spec` is required.
 ## Development
 
 ```bash
-npm test                # 168 unit tests, no network, no API calls
+npm test                # 190 unit tests, no network, no API calls
 npm run check           # syntax gate across src/
 npm run demo            # user-story plan rendering, offline
 npm run demo:api        # OpenAPI plan rendering, offline
 npm run test:generated  # codegen + real Playwright run, UI and API
 npm run report          # the above, plus a refreshed coverage report
 npm run demo:heal       # break two cases on purpose, run them, probe the live page
+npm run demo:auth       # sign in once, then run tests that need a session
 ```
 
 The unit tests never hit the API: the generator takes an injectable client, and three guards run offline —
@@ -309,6 +387,8 @@ src/
     testCaseGenerator.js       The Claude call, one path per input type
     stepTranslator.js          Step prose → Playwright statements (ui + api rules)
     codeGenerator.js           TestPlan → .spec.js source, branching on sourceType
+    locatorMap.js              Plan names → this app's test ids
+    authSetup.js               Auth profile → Playwright storageState setup project
   openapi/
     parser.js                  OpenAPI 3 / Swagger 2 → flat operations, filter, summary
   heal/
@@ -333,6 +413,9 @@ examples/
   jsonplaceholder-openapi.yaml OpenAPI spec for the API demo
   fixture-api-testplan.json    API plan behind `npm run test:generated`
   broken-saucedemo-testplan.json  Two deliberately broken cases, for the heal demo
+  saucedemo-inventory-testplan.json  Signed-in cases, for the auth demo
+  saucedemo-auth.json          Sign-in profile for the auth demo
+  saucedemo-locators.json      Test-id map for saucedemo
 docs/
   example-coverage-report.md   Committed sample of the Markdown report
 tests/                         Vitest, offline
@@ -350,6 +433,7 @@ playwright.config.js           ui and api projects, each with its own baseURL
 | 3 | Accept an OpenAPI/Swagger spec and generate API test cases | **Done** |
 | 4 | Coverage report — surface *why* each edge case matters | **Done** |
 | 5 | Self-healing: on failure, suggest a locator or assertion fix | **Done** |
+| 6 | Test-id locator maps and `storageState` auth, for use on a real app | **Done** |
 
 This is the one place a second model call earns its cost. Everything else — step translation, coverage, gap detection — is deterministic, because a parsing problem does not need a language model.
 

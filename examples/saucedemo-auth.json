@@ -1,0 +1,10 @@
+{
+  "name": "standard_user",
+  "url": "/",
+  "steps": [
+    { "action": "Type \"standard_user\" into the Username field", "expectedObservation": "" },
+    { "action": "Type \"secret_sauce\" into the Password field", "expectedObservation": "" },
+    { "action": "Click the \"Login\" button", "expectedObservation": "" }
+  ],
+  "expectedResult": "The shopper lands on /inventory.html"
+}

@@ -1,4 +1,5 @@
 import { CATEGORIES, CATEGORY_LABELS } from "./schema.js";
+import { DEFAULT_TEST_ID_ATTRIBUTE } from "./locatorMap.js";
 import { translateAction, translateObservation, quote } from "./stepTranslator.js";
 
 /** Which translation rules and Playwright fixture a plan compiles against. */
@@ -20,9 +21,11 @@ const INDENT = "  ";
  * network, so the interesting logic is testable without touching either.
  *
  * @param {object} plan - a plan that has been through parseTestPlan()
+ * @param {object} [options]
+ * @param {object} [options.locators] - parsed locator map, pinning names to test ids
  * @returns {{source: string, stats: object}}
  */
-export function generateSpec(plan) {
+export function generateSpec(plan, { locators = null } = {}) {
   const mode = specMode(plan);
   const stats = {
     tests: 0,
@@ -45,7 +48,8 @@ export function generateSpec(plan) {
     blocks.push(`test.describe(${quote(CATEGORY_LABELS[category])}, () => {\n${body}\n});`);
   }
 
-  const source = [header(plan), PREAMBLE[mode], blocks.join("\n\n"), ""].join("\n");
+  const preamble = mode === "api" ? API_PREAMBLE : uiPreamble(locators);
+  const source = [header(plan), preamble, blocks.join("\n\n"), ""].join("\n");
   return { source, stats, mode };
 }
 
@@ -62,24 +66,66 @@ function header(plan) {
   ].join("\n");
 }
 
-const UI_PREAMBLE = `
+/**
+ * The UI preamble carries the locator map into the generated file as data.
+ *
+ * Written as a plain attribute selector rather than Playwright's getByTestId,
+ * so the spec does not depend on a testIdAttribute setting in someone's
+ * config to keep working.
+ */
+export function uiPreamble(locators) {
+  const hasMap = locators && Object.keys(locators.elements).length > 0;
+  const attribute = locators?.attribute ?? DEFAULT_TEST_ID_ATTRIBUTE;
+
+  const mapBlock = hasMap
+    ? `
+// Names used in the plan, pinned to this app's test ids.
+const TEST_ID_ATTRIBUTE = '${attribute}';
+const LOCATORS = ${JSON.stringify(locators.elements, null, 2)};
+
+const byTestId = (page, name) =>
+  page.locator(\`[\${TEST_ID_ATTRIBUTE}="\${LOCATORS[name]}"]\`);
+`
+    : "";
+
+  const fieldBody = hasMap
+    ? `  LOCATORS[name]
+    ? byTestId(page, name)
+    : page.getByLabel(name).or(page.getByPlaceholder(name)).first();`
+    : `  page.getByLabel(name).or(page.getByPlaceholder(name)).first();`;
+
+  const byRoleBody = hasMap
+    ? `  LOCATORS[name] ? byTestId(page, name) : page.getByRole(role, { name });`
+    : `  page.getByRole(role, { name });`;
+
+  const clickableBody = hasMap
+    ? `  LOCATORS[name]
+    ? byTestId(page, name)
+    : page.getByRole('button', { name }).or(page.getByRole('link', { name })).first();`
+    : `  page.getByRole('button', { name }).or(page.getByRole('link', { name })).first();`;
+
+  return `
 import { test, expect } from '@playwright/test';
-
-/** Matches a form control by its visible label, falling back to placeholder text. */
+${mapBlock}
+/** Matches a form control by test id when one is mapped, else by label or placeholder. */
 const field = (page, name) =>
-  page.getByLabel(name).or(page.getByPlaceholder(name)).first();
+${fieldBody}
 
-/** Matches a button or link by its accessible name. */
+/** Matches a button or link by test id when one is mapped, else by accessible name. */
 const clickable = (page, name) =>
-  page.getByRole('button', { name }).or(page.getByRole('link', { name })).first();
+${clickableBody}
+
+/** Matches by role, unless the plan name is pinned to a test id. */
+const byRole = (page, role, name) =>
+${byRoleBody}
 `;
+}
 
 // API specs need no locator helpers — the request fixture is the whole surface.
 const API_PREAMBLE = `
 import { test, expect } from '@playwright/test';
 `;
 
-const PREAMBLE = { ui: UI_PREAMBLE, api: API_PREAMBLE };
 
 function renderTestCase(testCase, stats, mode) {
   const lines = [];

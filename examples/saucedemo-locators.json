@@ -1,0 +1,8 @@
+{
+  "attribute": "data-test",
+  "elements": {
+    "Username": "username",
+    "Password": "password",
+    "Login": "login-button"
+  }
+}

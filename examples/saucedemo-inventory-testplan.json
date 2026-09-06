@@ -1,0 +1,47 @@
+{
+  "sourceType": "user_story",
+  "sourceSummary": "The signed-in product catalogue on the Swag Labs demo storefront.",
+  "generatedAt": "2026-09-07T12:00:00.000Z",
+  "testCases": [
+    {
+      "id": "TC-001",
+      "title": "A signed-in shopper reaches the product catalogue directly",
+      "category": "happy_path",
+      "priority": "P0",
+      "preconditions": ["The shopper is signed in as standard_user"],
+      "steps": [
+        { "action": "Navigate to /inventory.html", "expectedObservation": "" }
+      ],
+      "expectedResult": "The heading \"Products\" is visible.",
+      "rationale": "Catches a session that is created at sign-in but not honoured on a direct navigation — the shopper gets bounced back to the login form on every deep link.",
+      "testData": []
+    },
+    {
+      "id": "TC-002",
+      "title": "The catalogue lists its products",
+      "category": "happy_path",
+      "priority": "P1",
+      "preconditions": ["The shopper is signed in as standard_user"],
+      "steps": [
+        { "action": "Navigate to /inventory.html", "expectedObservation": "" }
+      ],
+      "expectedResult": "The \"Sauce Labs Backpack\" is visible.",
+      "rationale": "Catches an empty catalogue rendering as a valid page: the shell loads, the heading is there, and no product ever appears.",
+      "testData": []
+    },
+    {
+      "id": "TC-003",
+      "title": "The cart is reachable from the catalogue",
+      "category": "edge_case",
+      "priority": "P2",
+      "preconditions": ["The shopper is signed in as standard_user"],
+      "steps": [
+        { "action": "Navigate to /inventory.html", "expectedObservation": "" },
+        { "action": "Navigate to /cart.html", "expectedObservation": "" }
+      ],
+      "expectedResult": "The heading \"Your Cart\" is visible.",
+      "rationale": "Catches the cart route losing the session where the catalogue keeps it, which is how a shopper ends up logged out at checkout.",
+      "testData": []
+    }
+  ]
+}

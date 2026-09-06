@@ -13,13 +13,14 @@
   "scripts": {
     "start": "node src/cli.js",
     "demo": "node src/cli.js generate --story examples/sample-user-story.txt --dry-run",
-    "codegen": "rm -rf generated-tests && node src/cli.js codegen --plan examples/saucedemo-testplan.json --name saucedemo && node src/cli.js codegen --plan examples/fixture-api-testplan.json --name jsonplaceholder",
+    "codegen": "rm -rf generated-tests && node src/cli.js codegen --plan examples/saucedemo-testplan.json --name saucedemo --locators examples/saucedemo-locators.json && node src/cli.js codegen --plan examples/fixture-api-testplan.json --name jsonplaceholder",
     "test": "vitest run",
     "test:generated": "npm run codegen && playwright test",
     "check": "for f in $(find src -name '*.js'); do node --check \"$f\" || exit 1; done && node --check playwright.config.js",
     "demo:api": "node src/cli.js generate --spec examples/jsonplaceholder-openapi.yaml --dry-run",
     "report": "npm run codegen && playwright test --reporter=json > .playwright-results.json && node src/cli.js report --plan examples/fixture-api-testplan.json --results .playwright-results.json --out docs/example-coverage-report.md",
-    "demo:heal": "rm -rf generated-tests && node src/cli.js codegen --plan examples/broken-saucedemo-testplan.json --name broken && (playwright test --project=ui --reporter=json > .playwright-results.json || true) && node src/cli.js heal --plan examples/broken-saucedemo-testplan.json --results .playwright-results.json --dry-run"
+    "demo:heal": "rm -rf generated-tests && node src/cli.js codegen --plan examples/broken-saucedemo-testplan.json --name broken && (playwright test --project=ui --reporter=json > .playwright-results.json || true) && node src/cli.js heal --plan examples/broken-saucedemo-testplan.json --results .playwright-results.json --dry-run",
+    "demo:auth": "rm -rf generated-tests .auth && node src/cli.js codegen --plan examples/saucedemo-inventory-testplan.json --name inventory --locators examples/saucedemo-locators.json --auth examples/saucedemo-auth.json && playwright test --project=ui"
   },
   "keywords": [
     "testing",

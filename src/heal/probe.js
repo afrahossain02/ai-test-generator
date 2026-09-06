@@ -63,12 +63,18 @@ export async function probePage({ url, steps = [], timeout = 15000 }) {
       };
 
       const selector =
-        'button, a[href], input, select, textarea, [role], h1, h2, h3, [data-testid], [data-test]';
+        'button, a[href], input, select, textarea, [role], h1, h2, h3, [data-testid], [data-test], [data-qa]';
 
       for (const element of document.querySelectorAll(selector)) {
         if (elements.length >= limit) break;
         const visible = Boolean(element.getClientRects().length);
         if (!visible) continue;
+
+        // Record which attribute carried the test id, so a generated locator
+        // map targets the convention this app actually uses.
+        const testIdAttribute = ["data-testid", "data-test", "data-qa"].find((attribute) =>
+          element.getAttribute(attribute),
+        );
 
         const entry = {
           role: roleOf(element),
@@ -76,7 +82,8 @@ export async function probePage({ url, steps = [], timeout = 15000 }) {
           tag: element.tagName.toLowerCase(),
           type: element.getAttribute("type") ?? "",
           placeholder: element.getAttribute("placeholder") ?? "",
-          testId: element.getAttribute("data-testid") ?? element.getAttribute("data-test") ?? "",
+          testId: testIdAttribute ? element.getAttribute(testIdAttribute) : "",
+          testIdAttribute: testIdAttribute ?? "",
           id: element.id ?? "",
         };
         if (!entry.role && !entry.name) continue;

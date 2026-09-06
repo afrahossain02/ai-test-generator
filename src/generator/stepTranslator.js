@@ -97,7 +97,7 @@ const UI_CODE = {
   fill: (intent) => [`await field(page, ${quote(intent.field)}).fill(${quote(intent.value)});`],
   clear: (intent) => [`await field(page, ${quote(intent.field)}).clear();`],
   clickRole: (intent) => [
-    `await page.getByRole('${intent.role}', { name: ${quote(intent.name)} }).click();`,
+    `await byRole(page, '${intent.role}', ${quote(intent.name)}).click();`,
   ],
   clickAny: (intent) => [`await clickable(page, ${quote(intent.name)}).click();`],
   check: (intent) => [
@@ -161,7 +161,7 @@ const UI_OBSERVATION_RULES = [
     name: "buttonVisible",
     pattern: /\bthe\s+"([^"]+)"\s+button\s+is\s+(?:visible|shown|displayed|enabled)/i,
     build: (match) => [
-      `await expect(page.getByRole('button', { name: ${quote(match[1])} }).first()).toBeVisible();`,
+      `await expect(byRole(page, 'button', ${quote(match[1])}).first()).toBeVisible();`,
     ],
   },
   {

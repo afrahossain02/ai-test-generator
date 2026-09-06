@@ -6,8 +6,8 @@ describe("translateAction", () => {
   const cases = [
     ["Navigate to /sign-in", "await page.goto('/sign-in');"],
     ['Type "ada@example.com" into the Email field', "await field(page, 'Email').fill('ada@example.com');"],
-    ['Click the "Sign in" button', "await page.getByRole('button', { name: 'Sign in' }).click();"],
-    ['Click the "Forgot password" link', "await page.getByRole('link', { name: 'Forgot password' }).click();"],
+    ['Click the "Sign in" button', "await byRole(page, 'button', 'Sign in').click();"],
+    ['Click the "Forgot password" link', "await byRole(page, 'link', 'Forgot password').click();"],
     ['Check the "Remember me" checkbox', "await field(page, 'Remember me').check();"],
     ['Select "Canada" from the Country dropdown', "await field(page, 'Country').selectOption('Canada');"],
   ];

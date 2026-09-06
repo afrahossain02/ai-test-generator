@@ -28,6 +28,12 @@ import { deriveTarget, resolveUrl } from "./heal/target.js";
 import { healCase } from "./heal/healer.js";
 import { applySuggestions, renderDecisions } from "./heal/apply.js";
 import { uiBaseUrl, apiBaseUrl } from "./utils/baseUrls.js";
+import { loadLocatorMap, locatorMapFromObservation } from "./generator/locatorMap.js";
+import {
+  generateAuthSetup,
+  parseAuthProfile,
+  DEFAULT_AUTH_STATE_PATH,
+} from "./generator/authSetup.js";
 import { parseTestPlan } from "./generator/schema.js";
 import { renderTestPlan } from "./utils/render.js";
 import { describeError } from "./utils/errors.js";
@@ -52,6 +58,8 @@ program
   .option("-d, --dry-run", "use the bundled example plan; makes no API call", false)
   .option("-m, --model <id>", "model to use", process.env.AI_TESTGEN_MODEL || DEFAULT_MODEL)
   .option("-e, --emit [dir]", "also write a Playwright spec file into this directory")
+  .option("-l, --locators <path>", "locator map pinning plan names to this app's test ids")
+  .option("-a, --auth <path>", "auth profile; also emits a sign-in setup project")
   .action(async (options) => {
     try {
       await runGenerate(options);
@@ -84,15 +92,17 @@ async function runGenerate(options) {
 
   if (options.emit) {
     const outDir = typeof options.emit === "string" ? options.emit : DEFAULT_OUT_DIR;
-    writeSpec(plan, { outDir });
+    const locators = options.locators ? loadLocatorMap(options.locators) : null;
+    writeSpec(plan, { outDir, locators });
+    if (options.auth) writeAuthSetup(options.auth, { outDir, locators });
   }
 }
 
 const DEFAULT_OUT_DIR = "generated-tests";
 
 /** Renders a plan as a Playwright spec and writes it, reporting what it produced. */
-function writeSpec(plan, { outDir, name }) {
-  const { source, stats } = generateSpec(plan);
+function writeSpec(plan, { outDir, name, locators = null }) {
+  const { source, stats } = generateSpec(plan, { locators });
   const fileName = `${name ?? slugify(plan.sourceSummary)}${specSuffix(plan)}`;
   const outPath = path.resolve(outDir, fileName);
 
@@ -112,6 +122,29 @@ function writeSpec(plan, { outDir, name }) {
   console.log(pc.dim(`  Run them with: npx playwright test ${displayPath(outPath)}`));
 
   return { outPath, stats };
+}
+
+/** Emits the sign-in setup project the generated specs depend on. */
+function writeAuthSetup(profilePath, { outDir, locators }) {
+  const resolved = path.resolve(profilePath);
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`No such file: ${resolved}`);
+  }
+
+  const profile = parseAuthProfile(JSON.parse(fs.readFileSync(resolved, "utf8")), {
+    filename: path.basename(resolved),
+  });
+  const outPath = path.resolve(outDir, "auth.setup.js");
+
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, generateAuthSetup(profile, { locators }));
+
+  console.log(`${pc.green("✓")} Wrote ${pc.bold(displayPath(outPath))}`);
+  console.log(
+    pc.dim(
+      `  Signs in as ${profile.name} once and saves the session to ${DEFAULT_AUTH_STATE_PATH}.`,
+    ),
+  );
 }
 
 function loadFixturePlan({ spec }) {
@@ -339,14 +372,58 @@ function indentBlock(text) {
 }
 
 program
+  .command("locators")
+  .description("Probe a page and write a starter locator map from its test ids")
+  .requiredOption("-u, --url <url>", "page to probe")
+  .option("-o, --out <path>", "write the map here", "locators.json")
+  .action(async (options) => {
+    try {
+      const observed = await probePage({ url: options.url });
+      const map = locatorMapFromObservation(observed);
+      const found = Object.keys(map.elements).length;
+
+      if (found === 0) {
+        console.log(
+          `\n${pc.yellow("!")} No named elements with a test id found on ${options.url}.`,
+        );
+        console.log(
+          pc.dim(
+            "  The generated tests will fall back to matching by label and placeholder text.\n",
+          ),
+        );
+        return;
+      }
+
+      const outPath = path.resolve(options.out);
+      fs.writeFileSync(outPath, `${JSON.stringify(map, null, 2)}\n`);
+
+      console.log(`\n${pc.green("✓")} Wrote ${pc.bold(displayPath(outPath))}`);
+      console.log(pc.dim(`  ${found} elements, keyed on the "${map.attribute}" attribute.`));
+      console.log(
+        pc.dim("  Review the names: they must match the wording your plans use.\n"),
+      );
+    } catch (error) {
+      reportError(error);
+    }
+  });
+
+program
   .command("codegen")
   .description("Turn a saved test plan into a Playwright spec file")
   .requiredOption("-p, --plan <path>", "path to a test plan JSON file")
   .option("-o, --out-dir <dir>", "directory to write the spec into", DEFAULT_OUT_DIR)
   .option("-n, --name <name>", "base name for the spec file (without .spec.js)")
+  .option("-l, --locators <path>", "locator map pinning plan names to this app's test ids")
+  .option("-a, --auth <path>", "auth profile; also emits a sign-in setup project")
   .action((options) => {
     try {
-      writeSpec(readPlan(options.plan), { outDir: options.outDir, name: options.name });
+      const locators = options.locators ? loadLocatorMap(options.locators) : null;
+      writeSpec(readPlan(options.plan), {
+        outDir: options.outDir,
+        name: options.name,
+        locators,
+      });
+      if (options.auth) writeAuthSetup(options.auth, { outDir: options.outDir, locators });
     } catch (error) {
       reportError(error);
     }
