@@ -1,0 +1,14 @@
+Title: Sign in with email and password
+
+As a registered customer
+I want to sign in with my email address and password
+So that I can access my order history and saved addresses
+
+Acceptance criteria:
+- The sign-in form has an Email field, a Password field, and a "Sign in" button.
+- On success the customer lands on /account and their name appears in the header.
+- On wrong credentials the form shows "Email or password is incorrect" and stays on the page.
+- Passwords must be between 8 and 64 characters.
+- After 5 consecutive failed attempts for the same email, further attempts are blocked for 15 minutes.
+- A "Remember me" checkbox keeps the session alive for 30 days instead of the default 24 hours.
+- The password field is never shown in plain text and is never included in any URL.

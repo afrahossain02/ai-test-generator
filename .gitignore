@@ -1,0 +1,6 @@
+node_modules/
+.env
+*.log
+out.json
+generated-tests/
+.DS_Store

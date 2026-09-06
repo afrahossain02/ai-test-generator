@@ -1,0 +1,38 @@
+{
+  "name": "ai-test-generator",
+  "version": "0.1.0",
+  "description": "Turns user stories into structured, executable test cases using AI.",
+  "type": "module",
+  "bin": {
+    "ai-testgen": "./src/cli.js"
+  },
+  "main": "./src/cli.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "demo": "node src/cli.js generate --story examples/sample-user-story.txt --dry-run",
+    "test": "vitest run",
+    "check": "node --check src/cli.js && node --check src/generator/schema.js && node --check src/generator/promptTemplates.js && node --check src/generator/testCaseGenerator.js && node --check src/utils/render.js && node --check src/utils/errors.js && node --check src/utils/paths.js"
+  },
+  "keywords": [
+    "testing",
+    "qa",
+    "test-cases",
+    "ai",
+    "claude",
+    "playwright"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
+    "commander": "^14.0.0",
+    "dotenv": "^17.0.0",
+    "picocolors": "^1.1.1",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,173 @@
+{
+  "sourceType": "user_story",
+  "sourceSummary": "Email and password sign-in for registered customers, with lockout after repeated failures and an optional 30-day session.",
+  "generatedAt": "2026-09-06T12:00:00.000Z",
+  "testCases": [
+    {
+      "id": "TC-001",
+      "title": "Valid credentials sign the customer in and land them on the account page",
+      "category": "happy_path",
+      "priority": "P0",
+      "preconditions": ["A registered customer exists with a known password"],
+      "steps": [
+        { "action": "Navigate to /sign-in", "expectedObservation": "The Email field, Password field and Sign in button are visible" },
+        { "action": "Type \"ada@example.com\" into the Email field", "expectedObservation": "" },
+        { "action": "Type \"Correct-Horse-9\" into the Password field", "expectedObservation": "" },
+        { "action": "Click the \"Sign in\" button", "expectedObservation": "The browser navigates away from /sign-in" }
+      ],
+      "expectedResult": "The customer is on /account and their name is visible in the header.",
+      "rationale": "The primary path. If this breaks, every other case is untestable.",
+      "testData": [
+        { "key": "email", "value": "ada@example.com" },
+        { "key": "password", "value": "Correct-Horse-9" }
+      ]
+    },
+    {
+      "id": "TC-002",
+      "title": "Remember me extends the session to 30 days",
+      "category": "happy_path",
+      "priority": "P1",
+      "preconditions": ["A registered customer exists with a known password"],
+      "steps": [
+        { "action": "Navigate to /sign-in", "expectedObservation": "" },
+        { "action": "Type \"ada@example.com\" into the Email field", "expectedObservation": "" },
+        { "action": "Type \"Correct-Horse-9\" into the Password field", "expectedObservation": "" },
+        { "action": "Check the \"Remember me\" checkbox", "expectedObservation": "The checkbox is checked" },
+        { "action": "Click the \"Sign in\" button", "expectedObservation": "The customer lands on /account" }
+      ],
+      "expectedResult": "The session cookie expires roughly 30 days out rather than 24 hours.",
+      "rationale": "Catches the common wiring bug where the checkbox is read but the cookie max-age is left at the default.",
+      "testData": [{ "key": "remember_me", "value": "checked" }]
+    },
+    {
+      "id": "TC-003",
+      "title": "Wrong password shows the error and keeps the customer on the page",
+      "category": "negative",
+      "priority": "P0",
+      "preconditions": ["A registered customer exists with a known password"],
+      "steps": [
+        { "action": "Navigate to /sign-in", "expectedObservation": "" },
+        { "action": "Type \"ada@example.com\" into the Email field", "expectedObservation": "" },
+        { "action": "Type \"wrong-password-1\" into the Password field", "expectedObservation": "" },
+        { "action": "Click the \"Sign in\" button", "expectedObservation": "An error message appears above the form" }
+      ],
+      "expectedResult": "The message \"Email or password is incorrect\" is shown and the URL is still /sign-in.",
+      "rationale": "Catches both the missing-error-message bug and the redirect-anyway bug, which are different failures with the same symptom to a user.",
+      "testData": [{ "key": "password", "value": "wrong-password-1" }]
+    },
+    {
+      "id": "TC-004",
+      "title": "Unregistered email produces the same error as a wrong password",
+      "category": "security",
+      "priority": "P0",
+      "preconditions": ["No account exists for nobody@example.com"],
+      "steps": [
+        { "action": "Navigate to /sign-in", "expectedObservation": "" },
+        { "action": "Type \"nobody@example.com\" into the Email field", "expectedObservation": "" },
+        { "action": "Type \"Correct-Horse-9\" into the Password field", "expectedObservation": "" },
+        { "action": "Click the \"Sign in\" button", "expectedObservation": "An error message appears" }
+      ],
+      "expectedResult": "The error text is identical to the wrong-password error, with no indication that the account does not exist.",
+      "rationale": "Catches user enumeration: a distinct \"no such account\" message lets an attacker harvest valid customer emails.",
+      "testData": [{ "key": "email", "value": "nobody@example.com" }]
+    },
+    {
+      "id": "TC-005",
+      "title": "Submitting with both fields empty does not attempt a sign-in",
+      "category": "negative",
+      "priority": "P1",
+      "preconditions": [],
+      "steps": [
+        { "action": "Navigate to /sign-in", "expectedObservation": "" },
+        { "action": "Click the \"Sign in\" button without typing anything", "expectedObservation": "Validation messages appear on both fields" }
+      ],
+      "expectedResult": "Both fields are marked as required and no network request to the sign-in endpoint is made.",
+      "rationale": "Catches the case where an empty submission counts toward the 5-attempt lockout, letting anyone lock out any account.",
+      "testData": []
+    },
+    {
+      "id": "TC-006",
+      "title": "A 7-character password is rejected and an 8-character one is accepted",
+      "category": "boundary",
+      "priority": "P1",
+      "preconditions": ["A registered customer exists whose password is exactly 8 characters"],
+      "steps": [
+        { "action": "Navigate to /sign-in", "expectedObservation": "" },
+        { "action": "Type \"ada@example.com\" into the Email field", "expectedObservation": "" },
+        { "action": "Type a 7-character password into the Password field", "expectedObservation": "" },
+        { "action": "Click the \"Sign in\" button", "expectedObservation": "A length validation message appears" },
+        { "action": "Replace the password with the correct 8-character password", "expectedObservation": "" },
+        { "action": "Click the \"Sign in\" button", "expectedObservation": "The customer lands on /account" }
+      ],
+      "expectedResult": "7 characters is rejected client-side; exactly 8 characters signs in successfully.",
+      "rationale": "Catches the off-by-one where the minimum is implemented as > 8 rather than >= 8, locking out every customer sitting exactly on the limit.",
+      "testData": [
+        { "key": "too_short", "value": "Abc-123" },
+        { "key": "at_minimum", "value": "Abc-1234" }
+      ]
+    },
+    {
+      "id": "TC-007",
+      "title": "A 65-character password is rejected while 64 characters is accepted",
+      "category": "boundary",
+      "priority": "P2",
+      "preconditions": ["A registered customer exists whose password is exactly 64 characters"],
+      "steps": [
+        { "action": "Navigate to /sign-in", "expectedObservation": "" },
+        { "action": "Type \"ada@example.com\" into the Email field", "expectedObservation": "" },
+        { "action": "Type a 65-character password into the Password field", "expectedObservation": "The field either refuses the 65th character or shows a validation message" },
+        { "action": "Replace it with the correct 64-character password and click \"Sign in\"", "expectedObservation": "The customer lands on /account" }
+      ],
+      "expectedResult": "64 characters signs in; 65 is refused rather than silently truncated.",
+      "rationale": "Catches silent truncation at the upper bound, where a 65-character password is accepted at sign-up but stored as 64 and can then be signed in with either.",
+      "testData": []
+    },
+    {
+      "id": "TC-008",
+      "title": "The sixth consecutive failed attempt is blocked rather than merely rejected",
+      "category": "edge_case",
+      "priority": "P0",
+      "preconditions": ["A registered customer exists", "No failed attempts have been recorded for this email in the last 15 minutes"],
+      "steps": [
+        { "action": "Navigate to /sign-in", "expectedObservation": "" },
+        { "action": "Submit the form five times with \"ada@example.com\" and a wrong password", "expectedObservation": "Each attempt shows the incorrect-credentials error" },
+        { "action": "Submit a sixth time with the CORRECT password", "expectedObservation": "A lockout message appears instead of a successful sign-in" }
+      ],
+      "expectedResult": "The sixth attempt is blocked with a lockout message and does not sign the customer in, even though the credentials are valid.",
+      "rationale": "Catches the lockout that counts attempts but never enforces them — the check is easy to write and easy to leave unwired, and it only fails on the sixth request.",
+      "testData": [{ "key": "attempts", "value": "5 wrong then 1 correct" }]
+    },
+    {
+      "id": "TC-009",
+      "title": "Trailing whitespace in the email does not prevent sign-in",
+      "category": "edge_case",
+      "priority": "P2",
+      "preconditions": ["A registered customer exists with a known password"],
+      "steps": [
+        { "action": "Navigate to /sign-in", "expectedObservation": "" },
+        { "action": "Type \"ada@example.com \" (with a trailing space) into the Email field", "expectedObservation": "" },
+        { "action": "Type \"Correct-Horse-9\" into the Password field", "expectedObservation": "" },
+        { "action": "Click the \"Sign in\" button", "expectedObservation": "The customer lands on /account" }
+      ],
+      "expectedResult": "The email is trimmed before lookup and sign-in succeeds.",
+      "rationale": "Catches the support-ticket generator where a password manager or mobile keyboard appends a space and the customer is told their password is wrong.",
+      "testData": [{ "key": "email", "value": "ada@example.com " }]
+    },
+    {
+      "id": "TC-010",
+      "title": "The password never appears in the URL or in plain text",
+      "category": "security",
+      "priority": "P0",
+      "preconditions": [],
+      "steps": [
+        { "action": "Navigate to /sign-in", "expectedObservation": "" },
+        { "action": "Read the type attribute of the Password field", "expectedObservation": "It is \"password\", so the value is masked" },
+        { "action": "Type \"Correct-Horse-9\" into the Password field and click \"Sign in\"", "expectedObservation": "" },
+        { "action": "Read the full URL after navigation", "expectedObservation": "" }
+      ],
+      "expectedResult": "The password does not appear in the URL, and the field is masked at all times.",
+      "rationale": "Catches a form defaulting to GET, which puts the password in the address bar, browser history, and every downstream referer header.",
+      "testData": []
+    }
+  ]
+}
